@@ -40,21 +40,24 @@ async function main() {
 					if (!repo) continue;
 					for await (const { record, rkey, collection, cid } of iterateAtpRepo(repo)) {
 						const uri = `at://${did}/${collection}/${rkey}`;
+						let timestamp: number;
 						try {
-							const { timestamp } = parseTID(rkey);
-							const line: BackfillLine = {
-								action: "create",
-								timestamp,
-								uri,
-								cid: cid.$link,
-								record,
-							};
-							ws.write(JSON.stringify(line) + "\n");
+							timestamp = parseTID(rkey).timestamp;
 						} catch {
-							console.warn(
-								`Skipping record ${uri} for pds ${pds} because of invalid rkey`,
-							);
+							timestamp =
+								record && typeof record === "object" && "createdAt" in record
+									&& typeof record.createdAt === "string"
+									? new Date(record.createdAt).getTime()
+									: Date.now();
 						}
+						const line: BackfillLine = {
+							action: "create",
+							timestamp,
+							uri,
+							cid: cid.$link,
+							record,
+						};
+						ws.write(JSON.stringify(line) + "\n");
 					}
 					seenDids[pds][did] = true;
 				} catch (err) {
