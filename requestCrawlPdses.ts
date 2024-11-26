@@ -1,4 +1,4 @@
-import { getPdses } from './shared.js'
+import { getPdses } from "./shared.js";
 
 declare global {
 	namespace NodeJS {
@@ -17,20 +17,25 @@ async function main() {
 
 	const bgs = "https://" + process.env.BSKY_REPO_PROVIDER.replace(/^[a-z]+:\/\//, "");
 
-	for (const url of pdses) {
+	await Promise.all(pdses.map(async (url) => {
 		const hostname = "https://" + new URL(url).hostname;
-		const res = await fetch(`${bgs}/xrpc/com.atproto.sync.requestCrawl`, {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ hostname }),
-		});
-
-		if (!res.ok) {
-			console.error(
-				`Error requesting crawl for ${hostname}: ${res.status} ${res.statusText} — ${await res.json().then(r => (r as any).error)}`,
-			);
+		try {
+			const res = await fetch(`${bgs}/xrpc/com.atproto.sync.requestCrawl`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ hostname }),
+				signal: AbortSignal.timeout(10000),
+			});
+			if (!res.ok) {
+				console.error(
+					`Error requesting crawl for ${hostname}: ${res.status} ${res.statusText} — ${await res
+						.json().then((r) => (r as any).error)}`,
+				);
+			}
+		} catch (err) {
+			console.error(`Network error requesting crawl for ${hostname}: ${err}`);
 		}
-	}
+	}));
 }
 
 void main();
