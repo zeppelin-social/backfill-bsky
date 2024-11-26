@@ -5,12 +5,12 @@ import * as fs from "node:fs";
 declare global {
 	namespace NodeJS {
 		interface ProcessEnv {
-			BGS_URL: string;
+			BSKY_REPO_PROVIDER: string;
 		}
 	}
 }
 
-for (const envVar of ["BGS_URL"]) {
+for (const envVar of ["BSKY_REPO_PROVIDER"]) {
 	if (!process.env[envVar]) throw new Error(`Missing env var ${envVar}`);
 }
 
@@ -20,7 +20,7 @@ function main() {
 	const idResolver = new IdResolver();
 	const firehose = new Firehose({
 		idResolver,
-		service: process.env.BGS_URL,
+		service: process.env.BSKY_REPO_PROVIDER,
 		handleEvent: async (event) => {
 			ws.write(JSON.stringify(event) + "\n");
 		},
