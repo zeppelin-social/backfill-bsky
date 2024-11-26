@@ -1,7 +1,6 @@
 import { iterateAtpRepo } from "@atcute/car";
 import { CredentialManager, type HeadersObject, XRPC, XRPCError } from "@atcute/client";
 import { parse as parseTID } from "@atcute/tid";
-import { sortFile } from "large-sort";
 import * as fs from "node:fs";
 import { type BackfillLine, getPdses, sleep } from "./shared.js";
 
@@ -64,6 +63,7 @@ async function main() {
 					console.warn(`Skipping repo ${did} for pds ${pds}: ${err}`);
 				}
 			}
+			console.log(`Finished processing ${pds}`);
 			return pds;
 		} catch (err) {
 			console.warn(`Skipping pds ${pds}: ${err}`);
@@ -71,19 +71,6 @@ async function main() {
 	}));
 
 	onFinish();
-
-	await sortFile<BackfillLine>(
-		"backfill-unsorted.jsonl",
-		"backfill-sorted.jsonl",
-		(str) => JSON.parse(str),
-		(line) => JSON.stringify(line),
-		(a, b) => a.timestamp > b.timestamp ? 1 : -1,
-	);
-
-	console.log(`Done sorting backfill data!
-  
-  Ensure the AppView is running, then run backfill-commits.ts to backfill the AppView.
-  Keep buffer-relay.ts running to receive live events until this is done. Then run backfill-buffer.ts to fill in the buffer, then restart the AppView to begin from cursor: 0.`);
 }
 
 async function getRepo(pds: string, did: `did:${string}`) {
