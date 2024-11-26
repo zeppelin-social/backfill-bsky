@@ -35,6 +35,8 @@ async function main() {
 			console.error(`Network error requesting crawl for ${hostname}: ${err}`);
 		}
 	}));
+	
+	console.log("Done!");
 }
 
 void main();
