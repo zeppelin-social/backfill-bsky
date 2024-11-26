@@ -123,9 +123,12 @@ async function* listRepos(pds: string) {
 }
 
 async function parseRatelimitHeadersAndWaitIfNeeded(headers: HeadersObject, pds: string) {
-	const ratelimitRemaining = parseInt(headers["ratelimit-remaining"]);
-	if (isNaN(ratelimitRemaining) || ratelimitRemaining < 1) {
-		const ratelimitReset = parseInt(headers["ratelimit-reset"]) * 1000;
+	const remainingHeader = headers["ratelimit-remaining"], resetHeader = headers["ratelimit-reset"];
+	if (!remainingHeader || !resetHeader) return;
+
+	const ratelimitRemaining = parseInt(remainingHeader);
+	if (isNaN(ratelimitRemaining) || ratelimitRemaining <= 1) {
+		const ratelimitReset = parseInt(resetHeader) * 1000;
 		if (isNaN(ratelimitReset)) {
 			throw new Error("ratelimit-reset header is not a number for pds " + pds);
 		} else {
