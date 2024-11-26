@@ -60,13 +60,13 @@ async function main() {
 					}
 					seenDids[pds][did] = true;
 				} catch (err) {
-					console.warn(`Skipping repo ${did} for pds ${pds}: ${err}`);
+					console.warn(`Skipping repo ${did} for pds ${pds} --- ${err}`);
 				}
 			}
 			console.log(`Finished processing ${pds}`);
 			return pds;
 		} catch (err) {
-			console.warn(`Skipping pds ${pds}: ${err}`);
+			console.warn(`Skipping pds ${pds} --- ${err}`);
 		}
 	}));
 
@@ -107,7 +107,7 @@ async function* listRepos(pds: string) {
 		} catch (err) {
 			if (err instanceof XRPCError && err.status === 429) {
 				await parseRatelimitHeadersAndWaitIfNeeded(err.headers, pds);
-			} else throw err;
+			} else console.warn(`Unhandled error while listing repos for pds ${pds} at cursor ${cursor} --- ${err}`);
 		}
 	} while (cursor);
 }
