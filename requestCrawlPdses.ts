@@ -18,7 +18,7 @@ async function main() {
 	const bgs = "https://" + process.env.BSKY_REPO_PROVIDER.replace(/^[a-z]+:\/\//, "");
 
 	for (const hostname of pdses) {
-		const res = await fetch(`${bgs}/pds/requestCrawl`, {
+		const res = await fetch(`${bgs}/xrpc/com.atproto.sync.requestCrawl`, {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({ hostname }),
