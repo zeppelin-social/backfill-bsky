@@ -8,7 +8,7 @@ declare global {
 	}
 }
 
-for (const envVar of ["BSKY_REPO_PROVIDER"]) {
+for (const envVar of ["BSKY_REPO_PROVIDER", "BGS_ADMIN_KEY"]) {
 	if (!process.env[envVar]) throw new Error(`Missing env var ${envVar}`);
 }
 
@@ -20,9 +20,9 @@ async function main() {
 	await Promise.all(pdses.map(async (url) => {
 		const hostname = "https://" + new URL(url).hostname;
 		try {
-			const res = await fetch(`${bgs}/xrpc/com.atproto.sync.requestCrawl`, {
+			const res = await fetch(`${bgs}/admin/pds/requestCrawl`, {
 				method: "POST",
-				headers: { "Content-Type": "application/json" },
+				headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.BGS_ADMIN_KEY}` },
 				body: JSON.stringify({ hostname }),
 			});
 			if (!res.ok) {
