@@ -105,9 +105,9 @@ async function getRepo(pds: string, did: `did:${string}`) {
 }
 
 async function* listRepos(pds: string) {
-	let cursor: string | undefined = "0";
+	let cursor: string | undefined = "";
 	const rpc = new XRPC({ handler: new CredentialManager({ service: pds }) });
-	while (cursor) {
+	do {
 		try {
 			const { data: { repos, cursor: newCursor }, headers } = await rpc.get(
 				"com.atproto.sync.listRepos",
@@ -126,7 +126,7 @@ async function* listRepos(pds: string) {
 				await parseRatelimitHeadersAndWaitIfNeeded(err.headers, pds);
 			} else throw err;
 		}
-	}
+	} while (cursor)
 }
 
 export async function getPdses(): Promise<Array<string>> {
