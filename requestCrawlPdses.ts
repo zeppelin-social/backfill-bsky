@@ -1,4 +1,4 @@
-import { getPdses } from "./backfillCommits.js";
+import { getPdses } from './shared.js'
 
 declare global {
 	namespace NodeJS {

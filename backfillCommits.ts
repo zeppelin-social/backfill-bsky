@@ -1,16 +1,9 @@
-import { iterateAtpRepo } from "@atcute/car";
-import { CredentialManager, type HeadersObject, XRPC, XRPCError } from "@atcute/client";
-import { parse as parseTID } from "@atcute/tid";
-import { sortFile } from "large-sort";
-import * as fs from "node:fs";
-
-export interface BackfillLine {
-	action: "create";
-	timestamp: number;
-	uri: string;
-	cid: string;
-	record: unknown;
-}
+import { iterateAtpRepo } from '@atcute/car'
+import { CredentialManager, type HeadersObject, XRPC, XRPCError } from '@atcute/client'
+import { parse as parseTID } from '@atcute/tid'
+import { sortFile } from 'large-sort'
+import * as fs from 'node:fs'
+import { type BackfillLine, getPdses, sleep } from './shared.js'
 
 async function main() {
 	const ws = fs.createWriteStream("backfill-unsorted.jsonl");
@@ -129,21 +122,6 @@ async function* listRepos(pds: string) {
 	} while (cursor)
 }
 
-export async function getPdses(): Promise<Array<string>> {
-	const atprotoScrapingData = await fetch(
-		"https://raw.githubusercontent.com/mary-ext/atproto-scraping/refs/heads/trunk/state.json",
-	).then((res) => res.ok ? res.json() : _throw("atproto-scraping state.json not ok")) as {
-		pdses?: Record<string, unknown>;
-	};
-
-	if (!atprotoScrapingData.pdses) throw new Error("No pdses in atproto-scraping");
-
-	const pdses = Object.keys(atprotoScrapingData.pdses).filter((pds) =>
-		pds.startsWith("https://")
-	);
-	return pdses;
-}
-
 async function parseRatelimitHeadersAndWaitIfNeeded(headers: HeadersObject, pds: string) {
 	const ratelimitRemaining = parseInt(headers["ratelimit-remaining"]);
 	if (isNaN(ratelimitRemaining) || ratelimitRemaining < 1) {
@@ -159,11 +137,5 @@ async function parseRatelimitHeadersAndWaitIfNeeded(headers: HeadersObject, pds:
 		}
 	}
 }
-
-const _throw = (err: string) => {
-	throw new Error(err);
-};
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 void main();

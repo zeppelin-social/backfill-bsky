@@ -5,7 +5,7 @@ import { AtUri } from "@atproto/syntax";
 import { CID } from "multiformats/cid";
 import fs from "node:fs";
 import readline from "node:readline/promises";
-import type { BackfillLine } from "./backfillCommits.js";
+import type { BackfillLine } from './shared.js'
 
 declare global {
 	namespace NodeJS {
