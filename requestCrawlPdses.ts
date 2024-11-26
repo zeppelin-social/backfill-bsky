@@ -17,7 +17,8 @@ async function main() {
 
 	const bgs = "https://" + process.env.BSKY_REPO_PROVIDER.replace(/^[a-z]+:\/\//, "");
 
-	for (const hostname of pdses) {
+	for (const url of pdses) {
+		const hostname = "https://" + new URL(url).hostname;
 		const res = await fetch(`${bgs}/xrpc/com.atproto.sync.requestCrawl`, {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
@@ -26,7 +27,7 @@ async function main() {
 
 		if (!res.ok) {
 			console.error(
-				`Error requesting crawl for ${hostname}: ${res.status} ${res.statusText}`,
+				`Error requesting crawl for ${hostname}: ${res.status} ${res.statusText} — ${await res.json().then(r => (r as any).error)}`,
 			);
 		}
 	}
