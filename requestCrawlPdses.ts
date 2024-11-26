@@ -3,20 +3,22 @@ import { getPdses } from "./backfillCommits.js";
 declare global {
 	namespace NodeJS {
 		interface ProcessEnv {
-			BGS_URL: string;
+			BSKY_REPO_PROVIDER: string;
 		}
 	}
 }
 
-for (const envVar of ["BGS_URL"]) {
+for (const envVar of ["BSKY_REPO_PROVIDER"]) {
 	if (!process.env[envVar]) throw new Error(`Missing env var ${envVar}`);
 }
 
 async function main() {
 	const pdses = await getPdses();
 
+	const bgs = "https://" + process.env.BSKY_REPO_PROVIDER.replace(/^[a-z]+:\/\//, "");
+
 	for (const hostname of pdses) {
-		const res = await fetch(`${process.env.BGS_URL}/pds/requestCrawl`, {
+		const res = await fetch(`${bgs}/pds/requestCrawl`, {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({ hostname }),
