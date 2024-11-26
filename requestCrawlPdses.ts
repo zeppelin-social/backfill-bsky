@@ -24,7 +24,6 @@ async function main() {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({ hostname }),
-				signal: AbortSignal.timeout(10000),
 			});
 			if (!res.ok) {
 				console.error(
