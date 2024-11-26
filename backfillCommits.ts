@@ -1,9 +1,9 @@
-import { iterateAtpRepo } from '@atcute/car'
-import { CredentialManager, type HeadersObject, XRPC, XRPCError } from '@atcute/client'
-import { parse as parseTID } from '@atcute/tid'
-import { sortFile } from 'large-sort'
-import * as fs from 'node:fs'
-import { type BackfillLine, getPdses, sleep } from './shared.js'
+import { iterateAtpRepo } from "@atcute/car";
+import { CredentialManager, type HeadersObject, XRPC, XRPCError } from "@atcute/client";
+import { parse as parseTID } from "@atcute/tid";
+import { sortFile } from "large-sort";
+import * as fs from "node:fs";
+import { type BackfillLine, getPdses, sleep } from "./shared.js";
 
 async function main() {
 	const ws = fs.createWriteStream("backfill-unsorted.jsonl");
@@ -119,11 +119,12 @@ async function* listRepos(pds: string) {
 				await parseRatelimitHeadersAndWaitIfNeeded(err.headers, pds);
 			} else throw err;
 		}
-	} while (cursor)
+	} while (cursor);
 }
 
 async function parseRatelimitHeadersAndWaitIfNeeded(headers: HeadersObject, pds: string) {
-	const remainingHeader = headers["ratelimit-remaining"], resetHeader = headers["ratelimit-reset"];
+	const remainingHeader = headers["ratelimit-remaining"],
+		resetHeader = headers["ratelimit-reset"];
 	if (!remainingHeader || !resetHeader) return;
 
 	const ratelimitRemaining = parseInt(remainingHeader);
