@@ -1,0 +1,28 @@
+{
+	"compilerOptions": {
+		"lib": ["esnext"],
+		"target": "esnext",
+		"module": "nodenext",
+		"moduleResolution": "nodenext",
+		"moduleDetection": "force",
+		"esModuleInterop": true,
+
+		"declaration": true,
+
+		"skipLibCheck": true,
+		"composite": true,
+		"newLine": "lf",
+
+		"forceConsistentCasingInFileNames": true,
+		"useDefineForClassFields": true,
+		"verbatimModuleSyntax": true,
+
+		"noUnusedLocals": true,
+		"noUnusedParameters": true,
+		"noImplicitOverride": true,
+		"noImplicitAny": true,
+		"exactOptionalPropertyTypes": true,
+		"strict": true
+	},
+	"include": ["./*.ts"]
+}
