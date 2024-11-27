@@ -25,6 +25,7 @@
 		"@atproto/sync": "^0.1.6",
 		"@atproto/syntax": "^0.3.1",
 		"large-sort": "^0.2.6",
-		"multiformats": "^13.3.1"
+		"multiformats": "^13.3.1",
+		"undici": "^6.21.0"
 	}
 }

@@ -9,7 +9,10 @@ import {
 } from "@atcute/client";
 import { parse as parseTID } from "@atcute/tid";
 import * as fs from "node:fs";
+import { Agent, fetch, setGlobalDispatcher } from "undici";
 import { type BackfillLine, getPdses, sleep } from "./shared.js";
+
+setGlobalDispatcher(new Agent({ keepAliveTimeout: 60_000, connect: { timeout: 60_000 } }));
 
 async function main() {
 	const ws = fs.createWriteStream("backfill-unsorted.jsonl");
@@ -135,7 +138,8 @@ const backoffs = [1000, 2500, 5000, 15000, 30000, 60000, 120000];
 
 class WrappedRPC extends XRPC {
 	constructor(public service: string) {
-		super({ handler: new CredentialManager({ service }) });
+		// @ts-expect-error undici version mismatch causing fetch type incompatibility
+		super({ handler: new CredentialManager({ service, fetch }) });
 	}
 	override async request(options: XRPCRequestOptions, attempt = 0): Promise<XRPCResponse> {
 		const url = this.service + "/xrpc/" + options.nsid;
@@ -156,6 +160,7 @@ class WrappedRPC extends XRPC {
 					await parseRatelimitHeadersAndWaitIfNeeded(err.headers, url);
 				} else throw err;
 			} else {
+				if (err instanceof TypeError) console.log(err);
 				await sleep(backoffs[attempt] || 60000);
 			}
 			return this.request(options, attempt + 1);
