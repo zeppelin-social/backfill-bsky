@@ -15,7 +15,7 @@ import { type BackfillLine, getPdses, sleep } from "./shared.js";
 setGlobalDispatcher(new Agent({ keepAliveTimeout: 60_000, connect: { timeout: 60_000 } }));
 
 async function main() {
-	const ws = fs.createWriteStream("backfill-unsorted.jsonl");
+	const ws = fs.createWriteStream("backfill-unsorted.jsonl", { flags: "a+" });
 
 	let seenDids: Record<string, Record<string, boolean>>;
 	try {
