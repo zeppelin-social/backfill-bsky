@@ -35,6 +35,14 @@ const agent = new Agent({
 const fetch: typeof _fetch = (input, init) =>
 	_fetch(input, init ? { ...init, dispatcher: agent } : {});
 
+const date = () => `[${new Date().toISOString()}]`;
+const _log = console.log.bind(console),
+	_warn = console.warn.bind(console),
+	_error = console.error.bind(console);
+console.log = (...args) => _log(date(), ...args);
+console.warn = (...args) => _warn(date(), ...args);
+console.error = (...args) => _error(date(), ...args);
+
 async function main() {
 	const ws = fs.createWriteStream("backfill-unsorted.jsonl", { flags: "a+" });
 
@@ -121,6 +129,7 @@ async function* listRepos(pds: string) {
 	const rpc = new WrappedRPC(pds);
 	do {
 		try {
+			console.log(`Listing repos for pds ${pds} at cursor ${cursor}`);
 			const { data: { repos, cursor: newCursor } } = await rpc.get(
 				"com.atproto.sync.listRepos",
 				{ params: { limit: 1000, cursor } },
@@ -166,7 +175,7 @@ class WrappedRPC extends XRPC {
 		super({ handler: new CredentialManager({ service, fetch }) });
 	}
 	override async request(options: XRPCRequestOptions, attempt = 0): Promise<XRPCResponse> {
-		const url = this.service + "/xrpc/" + options.nsid;
+		const url = new URL("/xrpc/" + options.nsid, this.service).href;
 
 		const request = async () => {
 			const res = await super.request(options);
