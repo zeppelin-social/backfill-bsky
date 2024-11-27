@@ -21,6 +21,7 @@ async function main() {
 	try {
 		seenDids = JSON.parse(fs.readFileSync("seen-dids.json", "utf-8"));
 	} catch {
+		if (fs.existsSync("seen-dids.json")) fs.copyFileSync("seen-dids.json", "seen-dids.json.bak");
 		seenDids = {};
 	}
 
