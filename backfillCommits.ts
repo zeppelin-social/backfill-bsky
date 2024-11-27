@@ -1,5 +1,12 @@
 import { iterateAtpRepo } from "@atcute/car";
-import { CredentialManager, type HeadersObject, XRPC, XRPCError } from "@atcute/client";
+import {
+	CredentialManager,
+	type HeadersObject,
+	XRPC,
+	XRPCError,
+	type XRPCRequestOptions,
+	type XRPCResponse,
+} from "@atcute/client";
 import { parse as parseTID } from "@atcute/tid";
 import * as fs from "node:fs";
 import { type BackfillLine, getPdses, sleep } from "./shared.js";
@@ -16,7 +23,7 @@ async function main() {
 
 	setInterval(() => {
 		fs.writeFileSync("seen-dids.json", JSON.stringify(seenDids));
-	}, 30_000);
+	}, 20_000);
 
 	const onFinish = () => {
 		ws.close();
@@ -34,9 +41,9 @@ async function main() {
 			seenDids[pds] ??= {};
 			for await (const did of listRepos(pds)) {
 				if (seenDids[pds][did]) continue;
+				const repo = await getRepo(pds, did);
+				if (!repo) continue;
 				try {
-					const repo = await getRepo(pds, did);
-					if (!repo) continue;
 					for await (const { record, rkey, collection, cid } of iterateAtpRepo(repo)) {
 						const uri = `at://${did}/${collection}/${rkey}`;
 						let timestamp: number;
@@ -58,15 +65,14 @@ async function main() {
 						};
 						ws.write(JSON.stringify(line) + "\n");
 					}
-					seenDids[pds][did] = true;
 				} catch (err) {
-					console.warn(`Skipping repo ${did} for pds ${pds} --- ${err}`);
+					console.warn(`iterateAtpRepo error for did ${did} from pds ${pds} --- ${err}`);
 				}
+				seenDids[pds][did] = true;
 			}
 			console.log(`Finished processing ${pds}`);
-			return pds;
 		} catch (err) {
-			console.warn(`Skipping pds ${pds} --- ${err}`);
+			console.warn(`Unknown error, skipping pds ${pds} --- ${err}`);
 		}
 	}));
 
@@ -74,25 +80,21 @@ async function main() {
 }
 
 async function getRepo(pds: string, did: `did:${string}`) {
-	const rpc = new XRPC({ handler: new CredentialManager({ service: pds }) });
-
+	const rpc = new WrappedRPC(pds);
 	try {
-		const { data, headers } = await rpc.get("com.atproto.sync.getRepo", { params: { did } });
-		await parseRatelimitHeadersAndWaitIfNeeded(headers, pds);
+		const { data } = await rpc.get("com.atproto.sync.getRepo", { params: { did } });
 		return data;
 	} catch (err) {
-		if (err instanceof XRPCError && err.status === 429) {
-			await parseRatelimitHeadersAndWaitIfNeeded(err.headers, pds);
-		} else throw err;
+		console.error(`getRepo error for did ${did} from pds ${pds} --- ${err}`);
 	}
 }
 
 async function* listRepos(pds: string) {
 	let cursor: string | undefined = "";
-	const rpc = new XRPC({ handler: new CredentialManager({ service: pds }) });
+	const rpc = new WrappedRPC(pds);
 	do {
 		try {
-			const { data: { repos, cursor: newCursor }, headers } = await rpc.get(
+			const { data: { repos, cursor: newCursor } } = await rpc.get(
 				"com.atproto.sync.listRepos",
 				{ params: { limit: 1000, cursor } },
 			);
@@ -102,17 +104,14 @@ async function* listRepos(pds: string) {
 			for (const repo of repos) {
 				yield repo.did;
 			}
-
-			await parseRatelimitHeadersAndWaitIfNeeded(headers, pds);
 		} catch (err) {
-			if (err instanceof XRPCError && err.status === 429) {
-				await parseRatelimitHeadersAndWaitIfNeeded(err.headers, pds);
-			} else console.warn(`Unhandled error while listing repos for pds ${pds} at cursor ${cursor} --- ${err}`);
+			console.error(`listRepos error for pds ${pds} at cursor ${cursor} --- ${err}`);
+			return;
 		}
 	} while (cursor);
 }
 
-async function parseRatelimitHeadersAndWaitIfNeeded(headers: HeadersObject, pds: string) {
+async function parseRatelimitHeadersAndWaitIfNeeded(headers: HeadersObject, url: string) {
 	const remainingHeader = headers["ratelimit-remaining"],
 		resetHeader = headers["ratelimit-reset"];
 	if (!remainingHeader || !resetHeader) return;
@@ -121,13 +120,45 @@ async function parseRatelimitHeadersAndWaitIfNeeded(headers: HeadersObject, pds:
 	if (isNaN(ratelimitRemaining) || ratelimitRemaining <= 1) {
 		const ratelimitReset = parseInt(resetHeader) * 1000;
 		if (isNaN(ratelimitReset)) {
-			throw new Error("ratelimit-reset header is not a number for pds " + pds);
+			console.error("ratelimit-reset header is not a number at url " + url);
 		} else {
 			const now = Date.now();
-			const waitTime = ratelimitReset - now + 3000; // add 3s to be safe
+			const waitTime = ratelimitReset - now + 2000; // add 2s to be safe
 			if (waitTime > 0) {
 				await sleep(waitTime);
 			}
+		}
+	}
+}
+
+const backoffs = [1000, 2500, 5000, 15000, 30000, 60000, 120000];
+
+class WrappedRPC extends XRPC {
+	constructor(public service: string) {
+		super({ handler: new CredentialManager({ service }) });
+	}
+	override async request(options: XRPCRequestOptions, attempt = 0): Promise<XRPCResponse> {
+		const url = this.service + "/xrpc/" + options.nsid;
+
+		const request = async () => {
+			const res = await super.request(options);
+			await parseRatelimitHeadersAndWaitIfNeeded(res.headers, url);
+			return res;
+		};
+
+		try {
+			return await request();
+		} catch (err) {
+			if (attempt > 6) throw err;
+
+			if (err instanceof XRPCError) {
+				if (err.status === 429) {
+					await parseRatelimitHeadersAndWaitIfNeeded(err.headers, url);
+				} else throw err;
+			} else {
+				await sleep(backoffs[attempt] || 60000);
+			}
+			return this.request(options, attempt + 1);
 		}
 	}
 }
