@@ -8,11 +8,32 @@ import {
 	type XRPCResponse,
 } from "@atcute/client";
 import { parse as parseTID } from "@atcute/tid";
+import CacheableLookup from "cacheable-lookup";
 import * as fs from "node:fs";
-import { Agent, fetch, setGlobalDispatcher } from "undici";
+import { Agent, fetch as _fetch } from "undici";
 import { type BackfillLine, getPdses, sleep } from "./shared.js";
 
-setGlobalDispatcher(new Agent({ keepAliveTimeout: 60_000, connect: { timeout: 60_000 } }));
+const cacheable = new CacheableLookup();
+
+const agent = new Agent({
+	keepAliveTimeout: 300_000,
+	connect: {
+		timeout: 300_000,
+		lookup: (hostname, { family: _family, hints, all, ..._options }, callback) => {
+			const family = !_family ? undefined : (_family === 6 || _family === "IPv6") ? 6 : 4;
+			return cacheable.lookup(hostname, {
+				..._options,
+				// needed due to eOPT
+				...(family ? { family } : {}),
+				...(hints ? { hints } : {}),
+				...(all ? { all } : {}),
+			}, callback);
+		},
+	},
+});
+
+const fetch: typeof _fetch = (input, init) =>
+	_fetch(input, init ? { ...init, dispatcher: agent } : {});
 
 async function main() {
 	const ws = fs.createWriteStream("backfill-unsorted.jsonl", { flags: "a+" });
@@ -21,7 +42,9 @@ async function main() {
 	try {
 		seenDids = JSON.parse(fs.readFileSync("seen-dids.json", "utf-8"));
 	} catch {
-		if (fs.existsSync("seen-dids.json")) fs.copyFileSync("seen-dids.json", "seen-dids.json.bak");
+		if (fs.existsSync("seen-dids.json")) {
+			fs.copyFileSync("seen-dids.json", "seen-dids.json.bak");
+		}
 		seenDids = {};
 	}
 
@@ -135,7 +158,7 @@ async function parseRatelimitHeadersAndWaitIfNeeded(headers: HeadersObject, url:
 	}
 }
 
-const backoffs = [1000, 2500, 5000, 15000, 30000, 60000, 120000];
+const backoffs = [1_000, 5_000, 15_000, 30_000, 60_000, 120_000, 300_000];
 
 class WrappedRPC extends XRPC {
 	constructor(public service: string) {
@@ -161,9 +184,9 @@ class WrappedRPC extends XRPC {
 					await parseRatelimitHeadersAndWaitIfNeeded(err.headers, url);
 				} else throw err;
 			} else {
-				if (err instanceof TypeError) console.log(err);
 				await sleep(backoffs[attempt] || 60000);
 			}
+			console.warn(`Retrying request to ${url}, on attempt ${attempt}`);
 			return this.request(options, attempt + 1);
 		}
 	}
