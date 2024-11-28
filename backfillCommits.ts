@@ -51,7 +51,7 @@ const repoQueue = new Queue("repo-processing");
 if (cluster.isPrimary) {
 	const numCPUs = cpus().length;
 
-	for (let i = 0; i < numCPUs * 0.75; i++) {
+	for (let i = 0; i < numCPUs; i++) {
 		cluster.fork();
 	}
 
