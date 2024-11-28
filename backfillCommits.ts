@@ -8,8 +8,11 @@ import {
 	type XRPCResponse,
 } from "@atcute/client";
 import { parse as parseTID } from "@atcute/tid";
+import Queue from "bee-queue";
 import CacheableLookup from "cacheable-lookup";
+import cluster from "node:cluster";
 import * as fs from "node:fs";
+import { cpus } from "node:os";
 import { Agent, fetch as _fetch } from "undici";
 import { type BackfillLine, getPdses, sleep } from "./shared.js";
 
@@ -43,7 +46,15 @@ console.log = (...args) => _log(date(), ...args);
 console.warn = (...args) => _warn(date(), ...args);
 console.error = (...args) => _error(date(), ...args);
 
-async function main() {
+const repoQueue = new Queue("repo-processing");
+
+if (cluster.isPrimary) {
+	const numCPUs = cpus().length;
+
+	for (let i = 0; i < numCPUs * 0.75; i++) {
+		cluster.fork();
+	}
+
 	const ws = fs.createWriteStream("backfill-unsorted.jsonl", { flags: "a+" });
 
 	let seenDids: Record<string, Record<string, boolean>>;
@@ -56,62 +67,119 @@ async function main() {
 		seenDids = {};
 	}
 
-	setInterval(() => {
-		fs.writeFileSync("seen-dids.json", JSON.stringify(seenDids));
-	}, 20_000);
-
-	const onFinish = () => {
+	const onFinish = async () => {
 		ws.close();
 		fs.writeFileSync("seen-dids.json", JSON.stringify(seenDids));
+		await repoQueue.close();
 	};
 
 	process.on("SIGINT", onFinish);
 	process.on("SIGTERM", onFinish);
 	process.on("exit", onFinish);
 
-	const pdses = await getPdses();
+	setInterval(() => {
+		fs.writeFileSync("seen-dids.json", JSON.stringify(seenDids));
+	}, 20_000);
 
-	await Promise.allSettled(pdses.map(async (pds) => {
-		try {
-			seenDids[pds] ??= {};
-			for await (const did of listRepos(pds)) {
-				if (seenDids[pds][did]) continue;
-				const repo = await getRepo(pds, did);
-				if (!repo) continue;
-				try {
-					for await (const { record, rkey, collection, cid } of iterateAtpRepo(repo)) {
-						const uri = `at://${did}/${collection}/${rkey}`;
-						let timestamp: number;
-						try {
-							timestamp = parseTID(rkey).timestamp;
-						} catch {
-							timestamp =
-								record && typeof record === "object" && "createdAt" in record
-									&& typeof record.createdAt === "string"
-									? new Date(record.createdAt).getTime()
-									: Date.now();
+	async function main() {
+		const pdses = await getPdses();
+
+		await Promise.allSettled(pdses.map(async (pds) => {
+			try {
+				seenDids[pds] ??= {};
+				for await (const did of listRepos(pds)) {
+					if (seenDids[pds][did]) continue;
+					const repo = await getRepo(pds, did);
+					if (!repo) continue;
+
+					const job = repoQueue.createJob({
+						pds,
+						did,
+						repo: Buffer.from(repo).toString("base64"),
+					});
+					job.on("succeeded", (result) => {
+						if (Array.isArray(result)) {
+							result.forEach((line) => {
+								ws.write(line);
+							});
 						}
-						const line: BackfillLine = {
-							action: "create",
-							timestamp,
-							uri,
-							cid: cid.$link,
-							record,
-						};
-						ws.write(JSON.stringify(line) + "\n");
-					}
-				} catch (err) {
-					console.warn(`iterateAtpRepo error for did ${did} from pds ${pds} --- ${err}`);
+						seenDids[pds][did] = true;
+					});
+					await job.save();
 				}
-				seenDids[pds][did] = true;
+				console.log(`Finished queueing ${pds}`);
+			} catch (err) {
+				console.warn(`Unknown error, skipping pds ${pds} --- ${err}`);
 			}
-			console.log(`Finished processing ${pds}`);
-		} catch (err) {
-			console.warn(`Unknown error, skipping pds ${pds} --- ${err}`);
-		}
-	}));
+		}));
 
-	onFinish();
+		await new Promise<void>((resolve) => {
+			const checkQueue = async () => {
+				const jobCounts = await repoQueue.checkHealth();
+				if (jobCounts.waiting === 0 && jobCounts.active === 0) {
+					resolve();
+				} else {
+					setTimeout(checkQueue, 1000);
+				}
+			};
+			checkQueue();
+		});
+
+		await onFinish();
+	}
+
+	void main();
+} else {
+	// Worker process
+	repoQueue.process(async (job) => {
+		const { pds, did, repo: repoStr } = job.data;
+		
+		if (!pds || typeof pds !== "string" || !did || typeof did !== "string" || !repoStr || typeof repoStr !== "string") {
+			console.warn(`Invalid job data for ${job.id}: ${JSON.stringify(job.data)}`);
+			return [];
+		}
+		
+		const repo = Buffer.from(repoStr, "base64");
+		const results: Array<string> = [];
+
+		try {
+			for await (const { record, rkey, collection, cid } of iterateAtpRepo(repo)) {
+				const uri = `at://${did}/${collection}/${rkey}`;
+				let timestamp: number;
+				try {
+					timestamp = parseTID(rkey).timestamp;
+				} catch {
+					timestamp =
+						record && typeof record === "object" && "createdAt" in record
+							&& typeof record.createdAt === "string"
+							? new Date(record.createdAt).getTime()
+							: Date.now();
+				}
+				const line: BackfillLine = {
+					action: "create",
+					timestamp,
+					uri,
+					cid: cid.$link,
+					record,
+				};
+
+				results.push(JSON.stringify(line) + "\n");
+			}
+			return results;
+		} catch (err) {
+			console.warn(`iterateAtpRepo error for did ${did} from pds ${pds} --- ${err}`);
+			return [];
+		}
+	});
+
+	// Error handling
+	repoQueue.on("error", (err) => {
+		console.error("Queue error:", err);
+	});
+
+	repoQueue.on("failed", (job, err) => {
+		console.error(`Job failed for ${job.data.did}:`, err);
+	});
 }
 
 async function getRepo(pds: string, did: `did:${string}`) {
@@ -200,5 +268,3 @@ class WrappedRPC extends XRPC {
 		}
 	}
 }
-
-void main();
