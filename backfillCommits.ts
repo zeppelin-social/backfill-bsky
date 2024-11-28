@@ -46,7 +46,10 @@ console.log = (...args) => _log(date(), ...args);
 console.warn = (...args) => _warn(date(), ...args);
 console.error = (...args) => _error(date(), ...args);
 
-const repoQueue = new Queue("repo-processing");
+const repoQueue = new Queue("repo-processing", {
+	removeOnSuccess: true,
+	removeOnFailure: true,
+});
 
 if (cluster.isPrimary) {
 	const numCPUs = cpus().length;
