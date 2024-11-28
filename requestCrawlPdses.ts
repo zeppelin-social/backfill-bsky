@@ -17,25 +17,50 @@ async function main() {
 
 	const bgs = "https://" + process.env.BSKY_REPO_PROVIDER.replace(/^[a-z]+:\/\//, "");
 
-	await Promise.all(pdses.map(async (url) => {
-		const hostname = "https://" + new URL(url).hostname;
+	await Promise.all(pdses.map(async (_url) => {
+		const url = new URL(_url);
 		try {
 			const res = await fetch(`${bgs}/admin/pds/requestCrawl`, {
 				method: "POST",
-				headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.BGS_ADMIN_KEY}` },
-				body: JSON.stringify({ hostname }),
+				headers: {
+					"Content-Type": "application/json",
+					Authorization: `Bearer ${process.env.BGS_ADMIN_KEY}`,
+				},
+				body: JSON.stringify({ hostname: "https://" + url.hostname }),
 			});
 			if (!res.ok) {
 				console.error(
-					`Error requesting crawl for ${hostname}: ${res.status} ${res.statusText} — ${await res
-						.json().then((r) => (r as any).error)}`,
+					`Error requesting crawl for ${url.hostname}: ${res.status} ${res.statusText} — ${await res
+						.json().then((r: any) => r?.error || "unknown error")}`,
+				);
+			}
+
+			const limitsRes = await fetch(`${bgs}/admin/pds/changeLimits`, {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+					Authorization: `Bearer ${process.env.BGS_ADMIN_KEY}`,
+				},
+				body: JSON.stringify({
+					host: url.hostname,
+					perSecond: 10_000,
+					perHour: 500_000,
+					perDay: 10_000_000,
+					repoLimit: 800_000,
+					crawlRate: 100_000,
+				}),
+			});
+			if (!limitsRes.ok) {
+				console.error(
+					`Error setting rate limits for ${url.hostname}: ${limitsRes.status} ${limitsRes.statusText} — ${await limitsRes
+						.json().then((r: any) => r?.error || "unknown error")}`,
 				);
 			}
 		} catch (err) {
-			console.error(`Network error requesting crawl for ${hostname}: ${err}`);
+			console.error(`Network error requesting crawl for ${url.hostname}: ${err}`);
 		}
 	}));
-	
+
 	console.log("Done!");
 }
 
