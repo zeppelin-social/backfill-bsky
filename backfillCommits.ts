@@ -57,6 +57,11 @@ if (cluster.isPrimary) {
 	for (let i = 0; i < numCPUs; i++) {
 		cluster.fork();
 	}
+	
+	cluster.on("exit", (worker, code, signal) => {
+		console.error(`${worker.process.pid} died with code ${code} and signal ${signal}`);
+		cluster.fork();
+	});
 
 	const ws = fs.createWriteStream("backfill-unsorted.jsonl", { flags: "a+" });
 
