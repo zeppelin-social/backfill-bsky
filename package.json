@@ -22,6 +22,7 @@
 		"@atcute/tid": "^1.0.1",
 		"@atproto/bsky": "^0.0.96",
 		"@atproto/identity": "^0.4.3",
+		"@atproto/repo": "^0.5.5",
 		"@atproto/sync": "^0.1.6",
 		"@atproto/syntax": "^0.3.1",
 		"bee-queue": "^1.7.1",

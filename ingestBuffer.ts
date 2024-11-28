@@ -4,6 +4,7 @@ import { WriteOpAction } from "@atproto/repo";
 import type { Event } from "@atproto/sync";
 import fs from "node:fs";
 import readline from "node:readline/promises";
+import { deserializeEvent } from "./bufferRelay.js";
 
 declare global {
 	namespace NodeJS {
@@ -52,7 +53,7 @@ async function main() {
 	for await (const line of rl) {
 		let evt: Event;
 		try {
-			evt = JSON.parse(line);
+			evt = deserializeEvent(JSON.parse(line));
 		} catch (err) {
 			console.error(err);
 			continue;
