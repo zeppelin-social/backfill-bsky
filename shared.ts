@@ -25,3 +25,17 @@ const _throw = (err: string) => {
 	throw new Error(err);
 };
 export const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+export async function* batch<T>(iterable: AsyncIterableIterator<T>, batchSize: number) {
+	let items: T[] = [];
+	for await (const item of iterable) {
+		items.push(item);
+		if (items.length >= batchSize) {
+			yield items;
+			items = [];
+		}
+	}
+	if (items.length !== 0) {
+		yield items;
+	}
+}

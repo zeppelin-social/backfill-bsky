@@ -14,7 +14,15 @@ import cluster from "node:cluster";
 import * as fs from "node:fs";
 import { cpus } from "node:os";
 import { Agent, fetch as _fetch } from "undici";
-import { type BackfillLine, getPdses, sleep } from "./shared.js";
+import { type BackfillLine, batch, getPdses, sleep } from "./shared.js";
+
+type WorkerToMasterMessage = { type: "checkCooldown"; pds: string } | {
+	type: "setCooldown";
+	pds: string;
+	until: number;
+};
+
+type MasterToWorkerMessage = { type: "cooldownResponse"; wait: boolean; waitTime?: number };
 
 const cacheable = new CacheableLookup();
 
@@ -26,7 +34,6 @@ const agent = new Agent({
 			const family = !_family ? undefined : (_family === 6 || _family === "IPv6") ? 6 : 4;
 			return cacheable.lookup(hostname, {
 				..._options,
-				// needed due to eOPT
 				...(family ? { family } : {}),
 				...(hints ? { hints } : {}),
 				...(all ? { all } : {}),
@@ -46,22 +53,113 @@ console.log = (...args) => _log(date(), ...args);
 console.warn = (...args) => _warn(date(), ...args);
 console.error = (...args) => _error(date(), ...args);
 
-const repoQueue = new Queue("repo-processing", {
-	removeOnSuccess: true,
-	removeOnFailure: true,
-});
+const repoQueue = new Queue("repo-processing", { removeOnSuccess: true, removeOnFailure: true, getEvents: true });
+
+class WrappedRPC extends XRPC {
+	constructor(public service: string) {
+		// @ts-expect-error undici version mismatch causing fetch type incompatibility
+		super({ handler: new CredentialManager({ service, fetch }) });
+	}
+
+	override async request(options: XRPCRequestOptions, attempt = 0): Promise<XRPCResponse> {
+		const url = new URL("/xrpc/" + options.nsid, this.service).href;
+
+		if (!cluster.isPrimary) {
+			await new Promise<void>((resolve) => {
+				if (!process.send) return;
+				process.send(
+					{ type: "checkCooldown", pds: this.service } satisfies WorkerToMasterMessage,
+				);
+
+				const handler = (message: MasterToWorkerMessage) => {
+					if (message.type === "cooldownResponse") {
+						process.off("message", handler);
+						if (message.wait && message.waitTime) {
+							sleep(message.waitTime + 1000).then(() => resolve());
+						} else {
+							resolve();
+						}
+					}
+				};
+
+				process.on("message", handler);
+			});
+		}
+
+		const request = async () => {
+			const res = await super.request(options);
+
+			if (!cluster.isPrimary) {
+				await processRatelimitHeaders(res.headers, url, (wait) => {
+					process.send!(
+						{
+							type: "setCooldown",
+							pds: this.service,
+							until: Date.now() + wait,
+						} satisfies WorkerToMasterMessage,
+					);
+				});
+			}
+
+			return res;
+		};
+
+		try {
+			return await request();
+		} catch (err) {
+			if (attempt > 6) throw err;
+
+			if (err instanceof XRPCError) {
+				if (err.status === 429) {
+					if (!cluster.isPrimary) {
+						await processRatelimitHeaders(err.headers, url, sleep);
+					}
+				} else throw err;
+			} else {
+				await sleep(backoffs[attempt] || 60000);
+			}
+			console.warn(`Retrying request to ${url}, on attempt ${attempt}`);
+			return this.request(options, attempt + 1);
+		}
+	}
+}
+
+async function getRepo(pds: string, did: `did:${string}`) {
+	const rpc = new WrappedRPC(pds);
+	try {
+		const { data } = await rpc.get("com.atproto.sync.getRepo", { params: { did } });
+		return data;
+	} catch (err) {
+		console.error(`getRepo error for did ${did} from pds ${pds} --- ${err}`);
+	}
+}
+
+async function* listRepos(pds: string) {
+	let cursor: string | undefined = "";
+	const rpc = new WrappedRPC(pds);
+	do {
+		try {
+			console.log(`Listing repos for pds ${pds} at cursor ${cursor}`);
+			const { data: { repos, cursor: newCursor } } = await rpc.get(
+				"com.atproto.sync.listRepos",
+				{ params: { limit: 1000, cursor } },
+			);
+
+			cursor = newCursor as string | undefined;
+
+			for (const repo of repos) {
+				yield repo.did;
+			}
+		} catch (err) {
+			console.error(`listRepos error for pds ${pds} at cursor ${cursor} --- ${err}`);
+			return;
+		}
+	} while (cursor);
+}
 
 if (cluster.isPrimary) {
 	const numCPUs = cpus().length;
-
-	for (let i = 0; i < numCPUs; i++) {
-		cluster.fork();
-	}
-	
-	cluster.on("exit", (worker, code, signal) => {
-		console.error(`${worker.process.pid} died with code ${code} and signal ${signal}`);
-		cluster.fork();
-	});
+	const cooldowns = new Map<string, number>();
 
 	const ws = fs.createWriteStream("backfill-unsorted.jsonl", { flags: "a+" });
 
@@ -75,45 +173,75 @@ if (cluster.isPrimary) {
 		seenDids = {};
 	}
 
+	cluster.on("message", (worker, message: WorkerToMasterMessage) => {
+		switch (message.type) {
+			case "checkCooldown": {
+				const cooldownUntil = cooldowns.get(message.pds);
+				const now = Date.now();
+				if (cooldownUntil && cooldownUntil > now) {
+					worker.send(
+						{
+							type: "cooldownResponse",
+							wait: true,
+							waitTime: cooldownUntil - now,
+						} satisfies MasterToWorkerMessage,
+					);
+				} else {
+					worker.send(
+						{ type: "cooldownResponse", wait: false } satisfies MasterToWorkerMessage,
+					);
+				}
+				break;
+			}
+			case "setCooldown": {
+				cooldowns.set(message.pds, message.until);
+				break;
+			}
+		}
+	});
+
+	for (let i = 0; i < numCPUs; i++) {
+		cluster.fork();
+	}
+
+	cluster.on("exit", (worker, code, signal) => {
+		console.error(`${worker.process.pid} died with code ${code} and signal ${signal}`);
+		cluster.fork();
+	});
+	
+	setInterval(() => {
+		fs.writeFileSync("seen-dids.json", JSON.stringify(seenDids));
+	}, 20_000);
+	
 	const onFinish = async () => {
 		ws.close();
 		fs.writeFileSync("seen-dids.json", JSON.stringify(seenDids));
 		await repoQueue.close();
 	};
-
+	
 	process.on("SIGINT", onFinish);
 	process.on("SIGTERM", onFinish);
 	process.on("exit", onFinish);
 
-	setInterval(() => {
-		fs.writeFileSync("seen-dids.json", JSON.stringify(seenDids));
-	}, 20_000);
-
 	async function main() {
 		const pdses = await getPdses();
+		
+		const onProgress = (line: string) => ws.write(line);
 
 		await Promise.allSettled(pdses.map(async (pds) => {
 			try {
 				seenDids[pds] ??= {};
-				for await (const did of listRepos(pds)) {
-					if (seenDids[pds][did]) continue;
-					const repo = await getRepo(pds, did);
-					if (!repo) continue;
-
-					const job = repoQueue.createJob({
-						pds,
-						did,
-						repo: Buffer.from(repo).toString("base64"),
-					});
-					job.on("succeeded", (result) => {
-						if (Array.isArray(result)) {
-							result.forEach((line) => {
-								ws.write(line);
+				for await (const dids of batch(listRepos(pds), 100)) {
+					await repoQueue.saveAll(
+						dids.filter((did) => !seenDids[pds][did]).map((did) => {
+							const job = repoQueue.createJob({ pds, did });
+							job.on("progress", onProgress);
+							job.on("succeeded", () => {
+								seenDids[pds][did] = true;
 							});
-						}
-						seenDids[pds][did] = true;
-					});
-					await job.save();
+							return job;
+						}),
+					);
 				}
 				console.log(`Finished queueing ${pds}`);
 			} catch (err) {
@@ -138,18 +266,17 @@ if (cluster.isPrimary) {
 
 	void main();
 } else {
-	// Worker process
 	repoQueue.process(async (job) => {
-		const { pds, did, repo: repoStr } = job.data;
-		
-		if (!pds || typeof pds !== "string" || !did || typeof did !== "string" || !repoStr || typeof repoStr !== "string") {
-			console.warn(`Invalid job data for ${job.id}: ${JSON.stringify(job.data)}`);
-			return [];
-		}
-		
-		const repo = Buffer.from(repoStr, "base64");
-		const results: Array<string> = [];
+		const { pds, did } = job.data;
 
+		if (!pds || typeof pds !== "string" || !did || typeof did !== "string") {
+			console.warn(`Invalid job data for ${job.id}: ${JSON.stringify(job.data)}`);
+			return;
+		}
+
+		const repo = await getRepo(pds, did as `did:${string}`);
+		if (!repo) return;
+		
 		try {
 			for await (const { record, rkey, collection, cid } of iterateAtpRepo(repo)) {
 				const uri = `at://${did}/${collection}/${rkey}`;
@@ -171,16 +298,13 @@ if (cluster.isPrimary) {
 					record,
 				};
 
-				results.push(JSON.stringify(line) + "\n");
+				job.reportProgress(JSON.stringify(line) + "\n");
 			}
-			return results;
 		} catch (err) {
 			console.warn(`iterateAtpRepo error for did ${did} from pds ${pds} --- ${err}`);
-			return [];
 		}
 	});
 
-	// Error handling
 	repoQueue.on("error", (err) => {
 		console.error("Queue error:", err);
 	});
@@ -190,40 +314,13 @@ if (cluster.isPrimary) {
 	});
 }
 
-async function getRepo(pds: string, did: `did:${string}`) {
-	const rpc = new WrappedRPC(pds);
-	try {
-		const { data } = await rpc.get("com.atproto.sync.getRepo", { params: { did } });
-		return data;
-	} catch (err) {
-		console.error(`getRepo error for did ${did} from pds ${pds} --- ${err}`);
-	}
-}
+const backoffs = [1_000, 5_000, 15_000, 30_000, 60_000, 120_000, 300_000];
 
-async function* listRepos(pds: string) {
-	let cursor: string | undefined = "";
-	const rpc = new WrappedRPC(pds);
-	do {
-		try {
-			console.log(`Listing repos for pds ${pds} at cursor ${cursor}`);
-			const { data: { repos, cursor: newCursor } } = await rpc.get(
-				"com.atproto.sync.listRepos",
-				{ params: { limit: 1000, cursor } },
-			);
-
-			cursor = newCursor as string | undefined; // I do not know why this is necessary but the previous line errors otherwise
-
-			for (const repo of repos) {
-				yield repo.did;
-			}
-		} catch (err) {
-			console.error(`listRepos error for pds ${pds} at cursor ${cursor} --- ${err}`);
-			return;
-		}
-	} while (cursor);
-}
-
-async function parseRatelimitHeadersAndWaitIfNeeded(headers: HeadersObject, url: string) {
+async function processRatelimitHeaders(
+	headers: HeadersObject,
+	url: string,
+	onRatelimit: (wait: number) => unknown,
+) {
 	const remainingHeader = headers["ratelimit-remaining"],
 		resetHeader = headers["ratelimit-reset"];
 	if (!remainingHeader || !resetHeader) return;
@@ -237,42 +334,8 @@ async function parseRatelimitHeadersAndWaitIfNeeded(headers: HeadersObject, url:
 			const now = Date.now();
 			const waitTime = ratelimitReset - now + 2000; // add 2s to be safe
 			if (waitTime > 0) {
-				await sleep(waitTime);
+				await onRatelimit(waitTime);
 			}
-		}
-	}
-}
-
-const backoffs = [1_000, 5_000, 15_000, 30_000, 60_000, 120_000, 300_000];
-
-class WrappedRPC extends XRPC {
-	constructor(public service: string) {
-		// @ts-expect-error undici version mismatch causing fetch type incompatibility
-		super({ handler: new CredentialManager({ service, fetch }) });
-	}
-	override async request(options: XRPCRequestOptions, attempt = 0): Promise<XRPCResponse> {
-		const url = new URL("/xrpc/" + options.nsid, this.service).href;
-
-		const request = async () => {
-			const res = await super.request(options);
-			await parseRatelimitHeadersAndWaitIfNeeded(res.headers, url);
-			return res;
-		};
-
-		try {
-			return await request();
-		} catch (err) {
-			if (attempt > 6) throw err;
-
-			if (err instanceof XRPCError) {
-				if (err.status === 429) {
-					await parseRatelimitHeadersAndWaitIfNeeded(err.headers, url);
-				} else throw err;
-			} else {
-				await sleep(backoffs[attempt] || 60000);
-			}
-			console.warn(`Retrying request to ${url}, on attempt ${attempt}`);
-			return this.request(options, attempt + 1);
 		}
 	}
 }
