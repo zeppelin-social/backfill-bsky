@@ -20,9 +20,13 @@ type WorkerToMasterMessage = { type: "checkCooldown"; pds: string } | {
 	type: "setCooldown";
 	pds: string;
 	until: number;
-};
+} | {
+	type: "checkDid";
+	pds: string;
+	did: string;
+}
 
-type MasterToWorkerMessage = { type: "cooldownResponse"; wait: boolean; waitTime?: number };
+type MasterToWorkerMessage = { type: "cooldownResponse"; wait: boolean; waitTime?: number } | { type: "didResponse"; seen: boolean };
 
 const cacheable = new CacheableLookup();
 
@@ -54,6 +58,10 @@ console.warn = (...args) => _warn(date(), ...args);
 console.error = (...args) => _error(date(), ...args);
 
 const repoQueue = new Queue("repo-processing", {
+	removeOnSuccess: true,
+	removeOnFailure: true,
+});
+const writeQueue = new Queue("write-commits", {
 	removeOnSuccess: true,
 	removeOnFailure: true,
 });
@@ -98,6 +106,15 @@ if (cluster.isPrimary) {
 				cooldowns.set(message.pds, message.until);
 				break;
 			}
+			case 'checkDid': {
+				const seen = seenDids[message.pds]?.[message.did];
+				worker.send({ type: 'didResponse', seen } satisfies MasterToWorkerMessage);
+				break;
+			}
+			default: {
+				((_: never) => {})(message); // assert unreachable
+				break;
+			}
 		}
 	});
 
@@ -118,29 +135,33 @@ if (cluster.isPrimary) {
 		ws.close();
 		fs.writeFileSync("seen-dids.json", JSON.stringify(seenDids));
 		await repoQueue.close();
+		await writeQueue.close();
 	};
 
 	process.on("SIGINT", onFinish);
 	process.on("SIGTERM", onFinish);
 	process.on("exit", onFinish);
+	
+	writeQueue.process((job, done) => {
+		const { lines, pds, did } = job.data;
+		if (!pds || !did || !lines || typeof lines !== "string") console.warn(`Invalid job data for ${job.id}: ${JSON.stringify(job.data)}`);
+		ws.write(lines, err => {
+			if (err) console.error(`Error writing ${did} commits: ${err}`);
+			else seenDids[pds][did] = true;
+			done();
+		});
+	})
 
 	async function main() {
 		const pdses = await getPdses();
-
-		const onProgress = (line: string) => ws.write(line);
-
+		
 		await Promise.allSettled(pdses.map(async (pds) => {
 			try {
-				seenDids[pds] ??= {};
 				for await (const dids of batch(listRepos(pds), 100)) {
 					await repoQueue.saveAll(
 						dids.filter((did) => !seenDids[pds][did]).map((did) => {
 							const job = repoQueue.createJob({ pds, did });
-							job.on("progress", onProgress);
-							job.on("succeeded", (lines) => {
-								seenDids[pds][did] = true;
-								if (lines && typeof lines === "string") ws.write(lines);
-							});
+							job.setId(did);
 							return job;
 						}),
 					);
@@ -175,7 +196,10 @@ if (cluster.isPrimary) {
 			console.warn(`Invalid job data for ${job.id}: ${JSON.stringify(job.data)}`);
 			return;
 		}
-
+		
+		const seen = await checkSeen(pds, did);
+		if (seen) return;
+		
 		const repo = await getRepo(pds, did as `did:${string}`);
 		if (!repo) return;
 
@@ -204,7 +228,9 @@ if (cluster.isPrimary) {
 
 				lines += JSON.stringify(line) + "\n";
 			}
-			return lines;
+			
+			const writeJob = writeQueue.createJob({ lines, pds, did });
+			await writeJob.save();
 		} catch (err) {
 			console.warn(`iterateAtpRepo error for did ${did} from pds ${pds} --- ${err}`);
 		}
@@ -217,6 +243,21 @@ if (cluster.isPrimary) {
 	repoQueue.on("failed", (job, err) => {
 		console.error(`Job failed for ${job.data.did}:`, err);
 	});
+	
+	function checkSeen(pds: string, did: string) {
+		return new Promise<boolean | null>((resolve, reject) => {
+			if (!process.send) return reject(new Error("Not in cluster"));
+			const handler = (message: MasterToWorkerMessage) => {
+				if (message.type === "didResponse") {
+					process.off("message", handler);
+					resolve(message.seen);
+				}
+			};
+			
+			process.on("message", handler);
+			process.send({ type: "checkDid", pds, did } satisfies WorkerToMasterMessage);
+		});
+	}
 }
 
 class WrappedRPC extends XRPC {
