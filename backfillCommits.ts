@@ -53,7 +53,11 @@ console.log = (...args) => _log(date(), ...args);
 console.warn = (...args) => _warn(date(), ...args);
 console.error = (...args) => _error(date(), ...args);
 
-const repoQueue = new Queue("repo-processing", { removeOnSuccess: true, removeOnFailure: true, getEvents: true });
+const repoQueue = new Queue("repo-processing", {
+	removeOnSuccess: true,
+	removeOnFailure: true,
+	getEvents: true,
+});
 
 class WrappedRPC extends XRPC {
 	constructor(public service: string) {
@@ -208,24 +212,24 @@ if (cluster.isPrimary) {
 		console.error(`${worker.process.pid} died with code ${code} and signal ${signal}`);
 		cluster.fork();
 	});
-	
+
 	setInterval(() => {
 		fs.writeFileSync("seen-dids.json", JSON.stringify(seenDids));
 	}, 20_000);
-	
+
 	const onFinish = async () => {
 		ws.close();
 		fs.writeFileSync("seen-dids.json", JSON.stringify(seenDids));
 		await repoQueue.close();
 	};
-	
+
 	process.on("SIGINT", onFinish);
 	process.on("SIGTERM", onFinish);
 	process.on("exit", onFinish);
 
 	async function main() {
 		const pdses = await getPdses();
-		
+
 		const onProgress = (line: string) => ws.write(line);
 
 		await Promise.allSettled(pdses.map(async (pds) => {
@@ -236,8 +240,9 @@ if (cluster.isPrimary) {
 						dids.filter((did) => !seenDids[pds][did]).map((did) => {
 							const job = repoQueue.createJob({ pds, did });
 							job.on("progress", onProgress);
-							job.on("succeeded", () => {
+							job.on("succeeded", (lines) => {
 								seenDids[pds][did] = true;
+								if (lines && typeof lines === "string") ws.write(lines);
 							});
 							return job;
 						}),
@@ -276,7 +281,9 @@ if (cluster.isPrimary) {
 
 		const repo = await getRepo(pds, did as `did:${string}`);
 		if (!repo) return;
-		
+
+		let lines = "";
+
 		try {
 			for await (const { record, rkey, collection, cid } of iterateAtpRepo(repo)) {
 				const uri = `at://${did}/${collection}/${rkey}`;
@@ -298,8 +305,9 @@ if (cluster.isPrimary) {
 					record,
 				};
 
-				job.reportProgress(JSON.stringify(line) + "\n");
+				lines += JSON.stringify(line) + "\n";
 			}
+			return lines;
 		} catch (err) {
 			console.warn(`iterateAtpRepo error for did ${did} from pds ${pds} --- ${err}`);
 		}
