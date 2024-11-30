@@ -56,110 +56,7 @@ console.error = (...args) => _error(date(), ...args);
 const repoQueue = new Queue("repo-processing", {
 	removeOnSuccess: true,
 	removeOnFailure: true,
-	getEvents: true,
 });
-
-class WrappedRPC extends XRPC {
-	constructor(public service: string) {
-		// @ts-expect-error undici version mismatch causing fetch type incompatibility
-		super({ handler: new CredentialManager({ service, fetch }) });
-	}
-
-	override async request(options: XRPCRequestOptions, attempt = 0): Promise<XRPCResponse> {
-		const url = new URL("/xrpc/" + options.nsid, this.service).href;
-
-		if (!cluster.isPrimary) {
-			await new Promise<void>((resolve) => {
-				if (!process.send) return;
-				process.send(
-					{ type: "checkCooldown", pds: this.service } satisfies WorkerToMasterMessage,
-				);
-
-				const handler = (message: MasterToWorkerMessage) => {
-					if (message.type === "cooldownResponse") {
-						process.off("message", handler);
-						if (message.wait && message.waitTime) {
-							sleep(message.waitTime + 1000).then(() => resolve());
-						} else {
-							resolve();
-						}
-					}
-				};
-
-				process.on("message", handler);
-			});
-		}
-
-		const request = async () => {
-			const res = await super.request(options);
-
-			if (!cluster.isPrimary) {
-				await processRatelimitHeaders(res.headers, url, (wait) => {
-					process.send!(
-						{
-							type: "setCooldown",
-							pds: this.service,
-							until: Date.now() + wait,
-						} satisfies WorkerToMasterMessage,
-					);
-				});
-			}
-
-			return res;
-		};
-
-		try {
-			return await request();
-		} catch (err) {
-			if (attempt > 6) throw err;
-
-			if (err instanceof XRPCError) {
-				if (err.status === 429) {
-					if (!cluster.isPrimary) {
-						await processRatelimitHeaders(err.headers, url, sleep);
-					}
-				} else throw err;
-			} else {
-				await sleep(backoffs[attempt] || 60000);
-			}
-			console.warn(`Retrying request to ${url}, on attempt ${attempt}`);
-			return this.request(options, attempt + 1);
-		}
-	}
-}
-
-async function getRepo(pds: string, did: `did:${string}`) {
-	const rpc = new WrappedRPC(pds);
-	try {
-		const { data } = await rpc.get("com.atproto.sync.getRepo", { params: { did } });
-		return data;
-	} catch (err) {
-		console.error(`getRepo error for did ${did} from pds ${pds} --- ${err}`);
-	}
-}
-
-async function* listRepos(pds: string) {
-	let cursor: string | undefined = "";
-	const rpc = new WrappedRPC(pds);
-	do {
-		try {
-			console.log(`Listing repos for pds ${pds} at cursor ${cursor}`);
-			const { data: { repos, cursor: newCursor } } = await rpc.get(
-				"com.atproto.sync.listRepos",
-				{ params: { limit: 1000, cursor } },
-			);
-
-			cursor = newCursor as string | undefined;
-
-			for (const repo of repos) {
-				yield repo.did;
-			}
-		} catch (err) {
-			console.error(`listRepos error for pds ${pds} at cursor ${cursor} --- ${err}`);
-			return;
-		}
-	} while (cursor);
-}
 
 if (cluster.isPrimary) {
 	const numCPUs = cpus().length;
@@ -320,6 +217,111 @@ if (cluster.isPrimary) {
 	repoQueue.on("failed", (job, err) => {
 		console.error(`Job failed for ${job.data.did}:`, err);
 	});
+}
+
+class WrappedRPC extends XRPC {
+	constructor(public service: string) {
+		// @ts-expect-error undici version mismatch causing fetch type incompatibility
+		super({ handler: new CredentialManager({ service, fetch }) });
+	}
+	
+	override async request(options: XRPCRequestOptions, attempt = 0): Promise<XRPCResponse> {
+		const url = new URL("/xrpc/" + options.nsid, this.service).href;
+		
+		if (!cluster.isPrimary) {
+			await new Promise<void>((resolve) => {
+				if (!process.send) return;
+				process.send(
+					{ type: "checkCooldown", pds: this.service } satisfies WorkerToMasterMessage,
+				);
+				
+				const handler = (message: MasterToWorkerMessage) => {
+					if (message.type === "cooldownResponse") {
+						process.off("message", handler);
+						if (message.wait && message.waitTime) {
+							sleep(message.waitTime + 1000).then(() => resolve());
+						} else {
+							resolve();
+						}
+					}
+				};
+				
+				process.on("message", handler);
+			});
+		}
+		
+		const request = async () => {
+			const res = await super.request(options);
+			
+			if (!cluster.isPrimary) {
+				await processRatelimitHeaders(res.headers, url, (wait) => {
+					process.send!(
+						{
+							type: "setCooldown",
+							pds: this.service,
+							until: Date.now() + wait,
+						} satisfies WorkerToMasterMessage,
+					);
+				});
+			}
+			
+			return res;
+		};
+		
+		try {
+			return await request();
+		} catch (err) {
+			if (attempt > 6) throw err;
+			
+			if (err instanceof XRPCError) {
+				if (err.status === 429) {
+					if (!cluster.isPrimary) {
+						await processRatelimitHeaders(err.headers, url, sleep);
+					}
+				} else throw err;
+			} else if (err instanceof TypeError) {
+				console.warn(`fetch failed for ${url}, skipping`);
+				throw err;
+			} else {
+				await sleep(backoffs[attempt] || 60000);
+			}
+			console.warn(`Retrying request to ${url}, on attempt ${attempt}`);
+			return this.request(options, attempt + 1);
+		}
+	}
+}
+
+async function getRepo(pds: string, did: `did:${string}`) {
+	const rpc = new WrappedRPC(pds);
+	try {
+		const { data } = await rpc.get("com.atproto.sync.getRepo", { params: { did } });
+		return data;
+	} catch (err) {
+		console.error(`getRepo error for did ${did} from pds ${pds} --- ${err}`);
+	}
+}
+
+async function* listRepos(pds: string) {
+	let cursor: string | undefined = "";
+	const rpc = new WrappedRPC(pds);
+	do {
+		try {
+			console.log(`Listing repos for pds ${pds} at cursor ${cursor}`);
+			const { data: { repos, cursor: newCursor } } = await rpc.get(
+				"com.atproto.sync.listRepos",
+				{ params: { limit: 1000, cursor } },
+			);
+			
+			cursor = newCursor as string | undefined;
+			
+			for (const repo of repos) {
+				yield repo.did;
+			}
+		} catch (err) {
+			console.error(`listRepos error for pds ${pds} at cursor ${cursor} --- ${err}`);
+			return;
+		}
+	} while (cursor);
 }
 
 const backoffs = [1_000, 5_000, 15_000, 30_000, 60_000, 120_000, 300_000];

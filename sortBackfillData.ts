@@ -1,5 +1,5 @@
-import { sortFile } from 'large-sort'
-import type { BackfillLine } from './shared.js'
+import { sortFile } from "large-sort";
+import type { BackfillLine } from "./shared.js";
 
 await sortFile<BackfillLine>(
 	"backfill-unsorted.jsonl",
