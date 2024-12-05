@@ -6,7 +6,7 @@ import { createClient } from "@redis/client";
 import RedisQueue from "bee-queue";
 import * as fastq from "fastq";
 import { CID } from "multiformats/cid";
-import { fetchAllRepos } from "../util/fetch.js";
+import { fetchAllRepos, getRepo } from '../util/fetch.js'
 import { WorkerPool } from "../util/workerPool.js";
 
 declare global {
@@ -78,13 +78,8 @@ async function main() {
 
 	// 150 concurrency queue to fetch repos, queue for processing, then queue results for writing
 	const getRepoQueue = fastq.promise(async ({ did, pds }: { did: string; pds: string }) => {
-		const buf = await fetch(new URL(`/xrpc/com.atproto.sync.getRepo?did=${did}`, pds), {
-			headers: { "Content-Type": "application/vnd.ipld.car" },
-		}).then((res) => {
-			if (!res.ok) throw new Error(`${did} getRepo failed: ${res.status} ${res.statusText}`);
-			return res.arrayBuffer();
-		});
-		const repoBytes = new Uint8Array(buf);
+		const repoBytes = await getRepo(did, pds);
+		if (!repoBytes?.length) return;
 		workerPool.queueTask({ did, repoBytes }, (err, result) => {
 			if (err) return console.error(`Error when processing ${did}`, err);
 			return Promise.allSettled(result.map((commit) => writeQueue.createJob(commit).save()))
@@ -100,3 +95,5 @@ async function main() {
 		await getRepoQueue.push({ did, pds });
 	}
 }
+
+void main();

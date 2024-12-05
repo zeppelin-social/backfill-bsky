@@ -4,7 +4,7 @@ import { WriteOpAction } from "@atproto/repo";
 import type { Event } from "@atproto/sync";
 import fs from "node:fs";
 import readline from "node:readline/promises";
-import { deserializeEvent } from "./bufferRelay.js";
+import { deserializeEvent } from "./serialize.js";
 
 declare global {
 	namespace NodeJS {
