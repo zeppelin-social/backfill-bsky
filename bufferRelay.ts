@@ -90,7 +90,7 @@ function serializeEvent(event: Event): SerializableEvent {
 		case "identity":
 			return event;
 		default:
-			throw new Error("Event not serializable", event);
+			throw new Error("Event not serializable: " + JSON.stringify(event));
 	}
 }
 
@@ -116,7 +116,7 @@ export function deserializeEvent(event: SerializableEvent): Event {
 		case "identity":
 			return event;
 		default:
-			throw new Error("Event not deserializable", event);
+			throw new Error("Event not deserializable: " + JSON.stringify(event));
 	}
 }
 

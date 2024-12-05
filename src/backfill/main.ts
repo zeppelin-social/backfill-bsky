@@ -1,0 +1,102 @@
+import * as bsky from "@atproto/bsky";
+import { IdResolver, MemoryCache } from "@atproto/identity";
+import { WriteOpAction } from "@atproto/repo";
+import { AtUri } from "@atproto/syntax";
+import { createClient } from "@redis/client";
+import RedisQueue from "bee-queue";
+import * as fastq from "fastq";
+import { CID } from "multiformats/cid";
+import { fetchAllRepos } from "../util/fetch.js";
+import { WorkerPool } from "../util/workerPool.js";
+
+declare global {
+	namespace NodeJS {
+		interface ProcessEnv {
+			BSKY_DB_POSTGRES_URL: string;
+			BSKY_DB_POSTGRES_SCHEMA: string;
+			BSKY_REPO_PROVIDER: string;
+			BSKY_DID_PLC_URL: string;
+		}
+	}
+}
+
+for (
+	const envVar of [
+		"BSKY_DB_POSTGRES_URL",
+		"BSKY_DB_POSTGRES_SCHEMA",
+		"BSKY_REPO_PROVIDER",
+		"BSKY_DID_PLC_URL",
+	]
+) {
+	if (!process.env[envVar]) throw new Error(`Missing env var ${envVar}`);
+}
+
+export type RepoWorkerMessage = { did: string; repoBytes: Uint8Array };
+export type CommitData = { uri: string; cid: string; indexedAt: string; record: unknown };
+
+async function main() {
+	const db = new bsky.Database({
+		url: process.env.BSKY_DB_POSTGRES_URL,
+		schema: process.env.BSKY_DB_POSTGRES_SCHEMA,
+		poolSize: 50,
+	});
+
+	const idResolver = new IdResolver({
+		plcUrl: process.env.BSKY_DID_PLC_URL,
+		didCache: new MemoryCache(),
+	});
+
+	const { indexingSvc } = new bsky.RepoSubscription({
+		service: process.env.BSKY_REPO_PROVIDER,
+		db,
+		idResolver,
+	});
+
+	const redis = createClient();
+
+	// 100 concurrency queue to write records to the AppView database
+	const writeQueue = new RedisQueue<CommitData>("write records", {
+		removeOnSuccess: true,
+		storeJobs: false,
+		redis,
+	});
+	writeQueue.process(100, (job) => {
+		const { uri, cid, indexedAt, record } = job.data;
+		return indexingSvc.indexRecord(
+			new AtUri(uri),
+			CID.parse(cid),
+			record,
+			WriteOpAction.Create,
+			indexedAt,
+		);
+	});
+
+	// Uses worker threads to parse repos
+	const workerPool = new WorkerPool<RepoWorkerMessage, Array<CommitData>>(
+		new URL("./repoWorker.ts", import.meta.url).href,
+	);
+
+	// 150 concurrency queue to fetch repos, queue for processing, then queue results for writing
+	const getRepoQueue = fastq.promise(async ({ did, pds }: { did: string; pds: string }) => {
+		const buf = await fetch(new URL(`/xrpc/com.atproto.sync.getRepo?did=${did}`, pds), {
+			headers: { "Content-Type": "application/vnd.ipld.car" },
+		}).then((res) => {
+			if (!res.ok) throw new Error(`${did} getRepo failed: ${res.status} ${res.statusText}`);
+			return res.arrayBuffer();
+		});
+		const repoBytes = new Uint8Array(buf);
+		workerPool.queueTask({ did, repoBytes }, (err, result) => {
+			if (err) return console.error(`Error when processing ${did}`, err);
+			return Promise.allSettled(result.map((commit) => writeQueue.createJob(commit).save()))
+				.then(() => redis.sAdd("backfill:seen", did)).catch((err) =>
+					console.error(`Error when writing ${did}`, err)
+				);
+		});
+	}, 150);
+
+	const repos = await fetchAllRepos();
+	for (const [did, pds] of repos) {
+		if (await redis.sIsMember("backfill:seen", did)) continue;
+		await getRepoQueue.push({ did, pds });
+	}
+}
