@@ -4,11 +4,13 @@ Backfills a Bluesky AppView with historical commit data. This is expected to run
 
 ## Steps
 
-0. Ensure BGS/relay is running.
-1. `requestCrawlPdses.ts` — informs relay of all PDSes to be crawled to begin emitting events.
-2. `bufferRelay.ts` — will run in the background until step 6 to buffer relay events while backfill is running.
-3. `backfillCommits.ts` — will backfill the AppView historical commit data from all repos. Expected to take 15-18 hours as of Nov 26 2024 (~600k users per PDS on largest PDSes / 3000 requests per 300 seconds).
-4. `sortBackfillData.ts` — will sort the backfilled data by timestamp.
-5. `ingestBackfill.ts` — will ingest the backfilled data into the AppView.
-6. `ingestBuffer.ts` — will ingest the buffered relay data into the AppView.
-7. Restart AppView to start listening from the relay at cursor=0.
+0. Ensure AppView and BGS/relay are running.
+1. `bun request-crawl` — informs relay of all PDSes to be crawled to begin emitting events.
+	- Requires: `BSKY_REPO_PROVIDER`, `BGS_ADMIN_KEY`
+2. `bun buffer` — will run in the background until step 4 to buffer relay events while backfill is running.
+	- Requires: `BSKY_REPO_PROVIDER`
+3. `bun backfill` — will backfill the AppView historical commit data from all repos. Expected to take 15-18 hours as of Nov 26 2024 (~600k users per PDS on largest PDSes / 3000 requests per 300 seconds).
+   - Requires: `BSKY_DB_POSTGRES_URL`, `BSKY_DB_POSTGRES_SCHEMA`, `BSKY_REPO_PROVIDER`, `BSKY_DID_PLC_URL`
+4. `bun buffer:ingest` — will ingest the buffered relay data into the AppView.
+	- Requires: `BSKY_DB_POSTGRES_URL`, `BSKY_DB_POSTGRES_SCHEMA`, `BSKY_REPO_PROVIDER`, `BSKY_DID_PLC_URL`
+5. Restart AppView to start listening from the relay at cursor=0, filling in any gaps in the buffer within the relay replay window.
