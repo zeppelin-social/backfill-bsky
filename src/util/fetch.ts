@@ -54,6 +54,10 @@ async function fetchPlcDids(map: Map<string, string> = new Map()): Promise<Map<s
 	do {
 		const res = await fetch(`https://plc.directory/export?limit=1000%after=${cursor}`);
 		if (!res.ok) {
+			if (res.status === 429) {
+				await sleep(10_000);
+				continue;
+			}
 			throw new Error(`Failed to fetch PLC DIDs: ${res.status} ${res.statusText}`);
 		}
 
