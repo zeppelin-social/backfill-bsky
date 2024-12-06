@@ -35,6 +35,28 @@ async function main() {
 						.json().then((r: any) => r?.error || "unknown error")}`,
 				);
 			}
+			
+			const limitsRes = await fetch(`${bgs}/admin/pds/changeLimits`, {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+					Authorization: `Bearer ${process.env.BGS_ADMIN_KEY}`,
+				},
+				body: JSON.stringify({
+					host: url.hostname,
+					perSecond: 10_000,
+					perHour: 10_000_000,
+					perDay: 200_000_000,
+					repoLimit: 1_000_000,
+					crawlRate: 100_000,
+				}),
+			});
+			if (!limitsRes.ok) {
+				console.error(
+					`Error setting rate limits for ${url.hostname}: ${limitsRes.status} ${limitsRes.statusText} — ${await limitsRes
+						.json().then((r: any) => r?.error || "unknown error")}`,
+				);
+			}
 		} catch (err) {
 			console.error(`Network error requesting crawl for ${url.hostname}: ${err}`);
 		}
