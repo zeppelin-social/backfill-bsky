@@ -13,6 +13,7 @@
 	"license": "ISC",
 	"devDependencies": {
 		"@types/node": "^22.9.4",
+		"@types/pg": "^8.11.10",
 		"dprint": "^0.47.5",
 		"tsx": "^4.19.2",
 		"typescript": "^5.7.2"
@@ -30,6 +31,7 @@
 		"cacheable-lookup": "^7.0.0",
 		"fastq": "^1.17.1",
 		"multiformats": "^13.3.1",
+		"pg": "^8.13.1",
 		"undici": "^6.21.0"
 	}
 }
