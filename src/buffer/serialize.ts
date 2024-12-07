@@ -1,7 +1,7 @@
-import type { AccountEvt, Create, Delete, Event, IdentityEvt, Update } from '@atproto/sync'
-import { AtUri } from '@atproto/syntax'
-import { CID } from 'multiformats/cid'
-import { BlockMap } from '@atproto/repo'
+import { BlockMap } from "@atproto/repo";
+import type { AccountEvt, Create, Delete, Event, IdentityEvt, Update } from "@atproto/sync";
+import { AtUri } from "@atproto/syntax";
+import { CID } from "multiformats/cid";
 
 type SerializableCreate = Omit<Create, "uri" | "blocks" | "commit" | "cid"> & {
 	uri: string;

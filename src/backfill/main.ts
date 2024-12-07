@@ -6,7 +6,7 @@ import { createClient } from "@redis/client";
 import RedisQueue from "bee-queue";
 import * as fastq from "fastq";
 import { CID } from "multiformats/cid";
-import { fetchAllRepos, getRepo } from '../util/fetch.js'
+import { fetchAllRepos, getRepo } from "../util/fetch.js";
 import { WorkerPool } from "../util/workerPool.js";
 
 declare global {

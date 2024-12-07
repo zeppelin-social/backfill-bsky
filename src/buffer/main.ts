@@ -1,10 +1,7 @@
 import { IdResolver } from "@atproto/identity";
-import {
-	Firehose,
-	MemoryRunner,
-} from "@atproto/sync";
+import { Firehose, MemoryRunner } from "@atproto/sync";
 import * as fs from "node:fs";
-import { serializeEvent } from './serialize.js'
+import { serializeEvent } from "./serialize.js";
 
 declare global {
 	namespace NodeJS {

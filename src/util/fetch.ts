@@ -18,10 +18,10 @@ export async function fetchAllRepos(): Promise<Map<string, string>> {
 
 export async function getRepo(did: string, pds: string, attempt = 0): Promise<Uint8Array | null> {
 	const url = new URL(`/xrpc/com.atproto.sync.getRepo?did=${did}`, pds).href;
-	
+
 	const cooldown = ratelimitCooldowns.get(url);
 	if (cooldown) await cooldown;
-	
+
 	try {
 		const res = await fetch(url);
 		await processRatelimitHeaders(res.headers, url);
@@ -32,17 +32,17 @@ export async function getRepo(did: string, pds: string, attempt = 0): Promise<Ui
 		return new Uint8Array(await res.arrayBuffer());
 	} catch (err) {
 		if (attempt > backoffs.length) throw err;
-		
+
 		// 400 = RepoDeactivated, RepoTakendown, or RepoNotFound
 		if (err instanceof Response && err.status === 400) {
-				const body = await err.json() as { message?: string; error?: string };
-				console.error(body.message || body.error || `Unknown error for repo: ${did}`)
-				return null;
+			const body = await err.json() as { message?: string; error?: string };
+			console.error(body.message || body.error || `Unknown error for repo: ${did}`);
+			return null;
 		} else if (err instanceof TypeError) {
 			console.warn(`fetch failed for ${url}, skipping`);
 			throw err;
 		}
-		
+
 		await sleep(backoffs[attempt]);
 		console.warn(`retrying request to ${url}, on attempt ${attempt}`);
 		return getRepo(did, pds, attempt + 1);
@@ -104,7 +104,7 @@ async function processRatelimitHeaders(headers: Headers, url: string) {
 	const remainingHeader = headers.get("ratelimit-remaining"),
 		resetHeader = headers.get("ratelimit-reset");
 	if (!remainingHeader || !resetHeader) return;
-	
+
 	const ratelimitRemaining = parseInt(remainingHeader);
 	if (isNaN(ratelimitRemaining) || ratelimitRemaining <= 1) {
 		const ratelimitReset = parseInt(resetHeader) * 1000;
