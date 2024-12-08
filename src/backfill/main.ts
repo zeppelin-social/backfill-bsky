@@ -63,7 +63,7 @@ async function main() {
 	// 200 concurrency queue to fetch repos, queue for processing, then write results
 	const getRepoQueue = new RedisQueue<{ did: string; pds: string }>(
 		"getRepo",
-		{ redis, removeOnSuccess: true, storeJobs: false }
+		{ removeOnSuccess: true, storeJobs: false }
 	);
 	getRepoQueue.process(200,  (job, done) => {
 		const { did, pds } = job.data;
