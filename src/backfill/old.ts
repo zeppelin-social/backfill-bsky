@@ -1,18 +1,16 @@
 import { iterateAtpRepo } from "@atcute/car";
 import {
-	CredentialManager,
-	type HeadersObject,
+	type HeadersObject, simpleFetchHandler,
 	XRPC,
 	XRPCError,
 	type XRPCRequestOptions,
 	type XRPCResponse,
-} from "@atcute/client";
+} from '@atcute/client'
 import { parse as parseTID } from "@atcute/tid";
 import Queue from "bee-queue";
 import CacheableLookup from "cacheable-lookup";
 import cluster from "node:cluster";
-import { cpus } from "node:os";
-import { Agent, fetch as _fetch } from "undici";
+import { Agent, setGlobalDispatcher } from 'undici'
 import { AtUri } from '@atproto/syntax'
 import { CID } from 'multiformats/cid'
 import { WriteOpAction } from '@atproto/repo'
@@ -33,7 +31,7 @@ type MasterToWorkerMessage = { type: "cooldownResponse"; wait: boolean; waitTime
 
 const cacheable = new CacheableLookup();
 
-const agent = new Agent({
+setGlobalDispatcher(new Agent({
 	keepAliveTimeout: 300_000,
 	connect: {
 		timeout: 300_000,
@@ -47,24 +45,13 @@ const agent = new Agent({
 			}, callback);
 		},
 	},
-});
-
-const fetch: typeof _fetch = (input, init) =>
-	_fetch(input, init ? { ...init, dispatcher: agent } : {});
-
-const date = () => `[${new Date().toISOString()}]`;
-const _log = console.log.bind(console),
-	_warn = console.warn.bind(console),
-	_error = console.error.bind(console);
-console.log = (...args) => _log(date(), ...args);
-console.warn = (...args) => _warn(date(), ...args);
-console.error = (...args) => _error(date(), ...args);
+}));
 
 const repoQueue = new Queue("repo-processing", {
 	removeOnSuccess: true,
 	removeOnFailure: true,
 });
-const writeQueue = new Queue("write-commits", {
+const writeQueue = new Queue<{ out: CommitData[], did: string }>("write-commits", {
 	removeOnSuccess: true,
 	removeOnFailure: true,
 });
@@ -133,7 +120,7 @@ if (cluster.isPrimary) {
 		cluster.fork();
 	});
 
-	writeQueue.process((job, done) => {
+	writeQueue.process((job: Queue.Job<{ out: CommitData[], did: string }>, done: (err: any, data?: any) => void) => {
 		const { out, did } = job.data;
 		console.log(`Writing ${out.length} records for ${did}`);
 		Promise.allSettled(out.map(({ uri, cid, indexedAt, record }) => indexingSvc.indexRecord(
@@ -237,8 +224,7 @@ if (cluster.isPrimary) {
 
 class WrappedRPC extends XRPC {
 	constructor(public service: string) {
-		// @ts-expect-error undici version mismatch causing fetch type incompatibility
-		super({ handler: new CredentialManager({ service, fetch }) });
+		super({ handler: simpleFetchHandler({ service }) });
 	}
 	
 	override async request(options: XRPCRequestOptions, attempt = 0): Promise<XRPCResponse> {
@@ -357,7 +343,7 @@ async function processRatelimitHeaders(
 			console.error("ratelimit-reset header is not a number at url " + url);
 		} else {
 			const now = Date.now();
-			const waitTime = ratelimitReset - now + 2000; // add 2s to be safe
+			const waitTime = ratelimitReset - now + 1000; // add 1s to be safe
 			if (waitTime > 0) {
 				await onRatelimit(waitTime);
 			}
