@@ -105,24 +105,16 @@ async function main() {
 
 void main();
 
-const readOrFetchDids = async () => {
+const readOrFetchDids = async (): Promise<Array<[string, string]>> => {
 	try {
-		const rs = fs.createReadStream("dids.json");
-		const rl = readline.createInterface({ input: rs, crlfDelay: Infinity });
-		const dids = new Map<string, string>();
-		for await (const line of rl) {
-			const [did, pds] = line.split(",");
-			dids.set(did, pds);
-		}
-		return dids;
+		return JSON.parse(fs.readFileSync("dids.json", "utf-8"));
 	} catch (err: any) {
-		if (err.code !== "ENOENT") throw err;
 		const dids = await fetchAllDids();
 		writeDids(dids);
 		return dids;
 	}
 };
 
-const writeDids = (dids: Iterable<[string, string]>) => {
-	fs.writeFileSync("dids.json", Array.from(dids).map(([did, pds]) => `${did},${pds}\n`).join(""));
+const writeDids = (dids: Array<[string, string]>) => {
+	fs.writeFileSync("dids.json", JSON.stringify(dids));
 };

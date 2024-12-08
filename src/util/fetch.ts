@@ -9,19 +9,18 @@ export async function fetchPdses(): Promise<Array<string>> {
 	return pdses;
 }
 
-export async function fetchAllDids(): Promise<Map<string, string>> {
-	const map = new Map<string, string>();
-
+export async function fetchAllDids(): Promise<Array<[string, string]>> {
 	console.log("Fetching DIDs");
 	const pdses = await fetchPdses();
-	await Promise.all(pdses.map((pds) => fetchPdsDids(pds, map)));
-	console.log(`Fetched ${map.size} DIDs`);
+	const dids = (await Promise.all(pdses.map(fetchPdsDids))).flat();
+	console.log(`Fetched ${dids.length} DIDs`);
 
-	return map;
+	return dids;
 }
 
-async function fetchPdsDids(pds: string, map: Map<string, string>): Promise<void> {
+async function fetchPdsDids(pds: string): Promise<Array<[string, string]>> {
 	const url = new URL(`/xrpc/com.atproto.sync.listRepos`, pds).href;
+	const map = new Map<string, string>();
 	let cursor = "";
 	let fetched = 0;
 	while (true) {
@@ -50,10 +49,11 @@ async function fetchPdsDids(pds: string, map: Map<string, string>): Promise<void
 			cursor = _c;
 		} catch (err: any) {
 			console.warn(`listRepos failed for ${url} at cursor ${cursor}, skipping`, err);
-			return;
+			break;
 		}
 	}
 	console.log(`Fetched ${fetched} DIDs from ${pds}`);
+	return Array.from(map.entries());
 }
 
 export async function getRepo(did: string, pds: string, attempt = 0): Promise<Uint8Array | null> {
