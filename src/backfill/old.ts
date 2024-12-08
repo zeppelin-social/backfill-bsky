@@ -96,7 +96,7 @@ if (cluster.isPrimary) {
 			done: (err: any, data?: any) => void,
 		) => {
 			const { out, did } = job.data;
-			console.log(`Writing ${out.length} records for ${did}`);
+			console.time(`Writing records: ${out.length} for ${did}`);
 			db.transaction(async (txn) => {
 				const idx = indexingSvc.transact(txn);
 				const insertHandle = idx.indexHandle(did, new Date().toISOString());
@@ -110,19 +110,23 @@ if (cluster.isPrimary) {
 				await Promise.allSettled([insertHandle, ...insertRecords])
 			}).then(() =>
 				redis.sAdd("backfill:seen", did)
-			).catch((err) => console.error(`Error when writing ${did}`, err)).finally(() =>
-				done(null)
+			).catch((err) => console.error(`Error when writing ${did}`, err)).finally(() => {
+					console.timeEnd(`Writing records: ${out.length} for ${did}`);
+					done(null)
+				}
 			);
 		},
 	);
 
 	repoFetchingQueue.process(200, async (job) => {
 		const { did, pds } = job.data;
+		console.time(`Fetching repo: ${did}`);
 		const repo = await getRepo(pds, did as `did:${string}`);
 		if (repo) {
 			const shared = shm.create(repo.length, "Uint8Array", did);
 			if (shared) shared.set(repo);
 			await repoProcessingQueue.createJob({ did }).setId(did).save();
+			console.timeEnd(`Fetching repo: ${did}`);
 		}
 	});
 
@@ -175,6 +179,8 @@ if (cluster.isPrimary) {
 			console.warn(`Did not get repo for ${did}`);
 			return;
 		}
+		
+		console.time(`Processing repo: ${did}`);
 
 		try {
 			const out = [];
@@ -212,6 +218,7 @@ if (cluster.isPrimary) {
 		} catch (err) {
 			console.warn(`iterateAtpRepo error for did ${did} --- ${err}`);
 		} finally {
+			console.timeEnd(`Processing repo: ${did}`);
 			shm.destroy(did);
 		}
 	});
