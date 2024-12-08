@@ -23,6 +23,7 @@ export async function fetchAllDids(): Promise<Map<string, string>> {
 async function fetchPdsDids(pds: string, map: Map<string, string>): Promise<void> {
 	const url = new URL(`/xrpc/com.atproto.sync.listRepos`, pds).href;
 	let cursor = "";
+	let fetched = 0;
 	while (true) {
 		try {
 			const res = await fetch(url + "?limit=1000&cursor=" + cursor);
@@ -42,17 +43,19 @@ async function fetchPdsDids(pds: string, map: Map<string, string>): Promise<void
 			};
 			for (const repo of repos) {
 				map.set(repo.did, pds);
+				fetched++;
 			}
 
-			if (!_c) break;
+			if (!_c || _c === cursor) break;
 			cursor = _c;
 		} catch (err) {
 			if (err instanceof TypeError) {
 				console.warn(`listRepos failed for ${url} at cursor ${cursor}, skipping`);
-				throw err;
 			}
+			throw err;
 		}
 	}
+	console.log(`Fetched ${fetched} DIDs from ${pds}`);
 }
 
 export async function getRepo(did: string, pds: string, attempt = 0): Promise<Uint8Array | null> {
