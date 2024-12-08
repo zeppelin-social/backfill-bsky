@@ -65,24 +65,25 @@ async function main() {
 		"getRepo",
 		{ redis, removeOnSuccess: true, storeJobs: false }
 	);
-	getRepoQueue.process(200, async job => {
+	getRepoQueue.process(200,  (job, done) => {
 		const { did, pds } = job.data;
 		console.log(`Fetching repo for ${did}`);
-		const repoBytes = await getRepo(did, pds);
-		if (!repoBytes?.length) return;
-		workerPool.queueTask({ did, repoBytes }, (err, result) => {
-			if (err) return console.error(`Error when processing ${did}`, err);
-			console.log(`Writing ${result.length} records for ${did}`);
-			return Promise.all(result.map(({ uri, cid, indexedAt, record }) => indexingSvc.indexRecord(
-				new AtUri(uri),
-				CID.parse(cid),
-				record,
-				WriteOpAction.Create,
-				indexedAt,
-			)))
-				.then(() => redis.sAdd("backfill:seen", did)).catch((err) =>
-					console.error(`Error when writing ${did}`, err)
-				);
+		getRepo(did, pds).then(repoBytes => {
+			if (!repoBytes?.length) return done(null);
+			workerPool.queueTask({ did, repoBytes }, (err, result) => {
+				if (err) return console.error(`Error when processing ${ did }`, err);
+				console.log(`Writing ${ result.length } records for ${ did }`);
+				return Promise.all(result.map(({ uri, cid, indexedAt, record }) => indexingSvc.indexRecord(
+					new AtUri(uri),
+					CID.parse(cid),
+					record,
+					WriteOpAction.Create,
+					indexedAt,
+				)))
+					.then(() => redis.sAdd("backfill:seen", did)).catch((err) =>
+						console.error(`Error when writing ${ did }`, err)
+					).finally(() => done(null));
+			});
 		});
 	})
 	
