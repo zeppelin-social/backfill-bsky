@@ -9,6 +9,7 @@ import { CID } from "multiformats/cid";
 import fs from "node:fs";
 import { fetchAllDids, getRepo } from "../util/fetch.js";
 import { WorkerPool } from "../util/workerPool.js";
+import readline from 'node:readline/promises'
 
 declare global {
 	namespace NodeJS {
@@ -104,11 +105,17 @@ void main();
 
 const readOrFetchDids = async () => {
 	try {
-		return new Map(
-			fs.readFileSync("dids.json", "utf-8").split("\n").map((line) =>
-				line.split(",") as [string, string]
-			),
-		);
+		const rs = fs.createReadStream("dids.json");
+		const rl = readline.createInterface({
+			input: rs,
+			crlfDelay: Infinity
+		});
+		const dids = new Map<string, string>();
+		for await (const line of rl) {
+			const [did, pds] = line.split(",");
+			dids.set(did, pds);
+		}
+		return dids;
 	} catch (err: any) {
 		if (err.code !== "ENOENT") throw err;
 		const dids = await fetchAllDids();
