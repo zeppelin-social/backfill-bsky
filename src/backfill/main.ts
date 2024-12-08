@@ -4,7 +4,6 @@ import { WriteOpAction } from "@atproto/repo";
 import { AtUri } from "@atproto/syntax";
 import { createClient } from "@redis/client";
 import RedisQueue from "bee-queue";
-import * as fastq from "fastq";
 import { CID } from "multiformats/cid";
 import fs from "node:fs";
 import { fetchAllDids, getRepo } from "../util/fetch.js";
@@ -61,8 +60,13 @@ async function main() {
 		new URL("./repoWorker.js", import.meta.url).href,
 	);
 
-	// 150 concurrency queue to fetch repos, queue for processing, then queue results for writing
-	const getRepoQueue = fastq.promise(async ({ did, pds }: { did: string; pds: string }) => {
+	// 200 concurrency queue to fetch repos, queue for processing, then write results
+	const getRepoQueue = new RedisQueue<{ did: string; pds: string }>(
+		"getRepo",
+		{ redis, removeOnSuccess: true, storeJobs: false }
+	);
+	getRepoQueue.process(200, async job => {
+		const { did, pds } = job.data;
 		console.log(`Fetching repo for ${did}`);
 		const repoBytes = await getRepo(did, pds);
 		if (!repoBytes?.length) return;
@@ -80,15 +84,16 @@ async function main() {
 					console.error(`Error when writing ${did}`, err)
 				);
 		});
-	}, 250);
-
+	})
+	
 	const repos = await readOrFetchDids();
 	const notSeen = await redis.smIsMember("backfill:seen", repos.map(repo => repo[0]))
 		.then(seen => repos.filter((_, i) => !seen[i]));
-	for (const [did, pds] of notSeen) {
-		getRepoQueue.push({ did, pds }).catch((err) =>
-			console.error(`Error when fetching ${did}`, err)
-		);
+	for (const dids of batch(notSeen, 1000)) {
+		const errors = await getRepoQueue.saveAll(dids.map(([did, pds ]) => getRepoQueue.createJob({ did, pds })))
+		for (const [job, err] of errors) {
+			console.error(`Failed to queue repo ${job.data.did}`, err);
+		}
 	}
 }
 
@@ -107,3 +112,11 @@ const readOrFetchDids = async (): Promise<Array<[string, string]>> => {
 const writeDids = (dids: Array<[string, string]>) => {
 	fs.writeFileSync("dids.json", JSON.stringify(dids));
 };
+
+const batch = <T>(array: Array<T>, size: number): Array<Array<T>> => {
+	const result = [];
+	for (let i = 0; i < array.length; i += size) {
+		result.push(array.slice(i, i + size));
+	}
+	return result;
+}
