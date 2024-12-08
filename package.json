@@ -33,6 +33,7 @@
 		"fastq": "^1.17.1",
 		"multiformats": "^13.3.1",
 		"pg": "^8.13.1",
+		"shared-node-buffer": "^1.2.3",
 		"undici": "^6.21.0"
 	}
 }
