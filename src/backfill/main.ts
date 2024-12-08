@@ -96,7 +96,7 @@ async function main() {
 	const repos = await readOrFetchDids();
 	for (const [did, pds] of repos) {
 		if (await redis.sIsMember("backfill:seen", did)) continue;
-		await getRepoQueue.push({ did, pds });
+		getRepoQueue.push({ did, pds }).catch((err) => console.error(`Error when fetching ${did}`, err));
 	}
 }
 
