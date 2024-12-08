@@ -90,22 +90,25 @@ if (cluster.isPrimary) {
 	});
 
 	writeQueue.process(
-		50,
+		100,
 		(
 			job: Queue.Job<{ out: CommitData[]; did: string }>,
 			done: (err: any, data?: any) => void,
 		) => {
 			const { out, did } = job.data;
 			console.log(`Writing ${out.length} records for ${did}`);
-			Promise.allSettled(out.map(({ uri, cid, indexedAt, record }) =>
-				indexingSvc.indexRecord(
-					new AtUri(uri),
-					CID.parse(cid),
-					record,
-					WriteOpAction.Create,
-					indexedAt,
-				)
-			)).then(() =>
+			db.transaction(async (txn) => {
+				const idx = indexingSvc.transact(txn);
+				const insertHandle = idx.indexHandle(did, new Date().toISOString());
+				const insertRecords = out.map(({ uri: _uri, cid, indexedAt, record }) => {
+					const uri = new AtUri(_uri);
+					const indexer = idx.findIndexerForCollection(uri.collection)
+					if (indexer) {
+						return indexer.insertRecord(uri, CID.parse(cid), record, indexedAt)
+					}
+				});
+				await Promise.allSettled([insertHandle, ...insertRecords])
+			}).then(() =>
 				redis.sAdd("backfill:seen", did)
 			).catch((err) => console.error(`Error when writing ${did}`, err)).finally(() =>
 				done(null)
@@ -113,7 +116,7 @@ if (cluster.isPrimary) {
 		},
 	);
 
-	repoFetchingQueue.process(150, async (job) => {
+	repoFetchingQueue.process(200, async (job) => {
 		const { did, pds } = job.data;
 		const repo = await getRepo(pds, did as `did:${string}`);
 		if (repo) {
