@@ -65,7 +65,7 @@ async function main() {
 		"getRepo",
 		{ removeOnSuccess: true, storeJobs: false }
 	);
-	getRepoQueue.process(200,  (job, done) => {
+	getRepoQueue.process(1000,  (job, done) => {
 		const { did, pds } = job.data;
 		console.log(`Fetching repo for ${did}`);
 		getRepo(did, pds).then(repoBytes => {
