@@ -87,10 +87,14 @@ async function main() {
 		});
 	})
 	
+	console.log("Reading DIDs");
 	const repos = await readOrFetchDids();
+	console.log(`Filtering out seen DIDs from ${repos.length} total`);
 	const notSeen = await redis.smIsMember("backfill:seen", repos.map(repo => repo[0]))
 		.then(seen => repos.filter((_, i) => !seen[i]));
+	console.log(`Queuing ${notSeen.length} repos for processing`);
 	for (const dids of batch(notSeen, 1000)) {
+		console.log(`Queuing ${dids.length} repos`);
 		const errors = await getRepoQueue.saveAll(dids.map(([did, pds ]) => getRepoQueue.createJob({ did, pds })))
 		for (const [job, err] of errors) {
 			console.error(`Failed to queue repo ${job.data.did}`, err);
