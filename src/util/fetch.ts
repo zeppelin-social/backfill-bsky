@@ -9,11 +9,50 @@ export async function fetchPdses(): Promise<Array<string>> {
 	return pdses;
 }
 
-export async function fetchAllRepos(): Promise<Map<string, string>> {
+export async function fetchAllDids(): Promise<Map<string, string>> {
 	const map = new Map<string, string>();
-	await fetchPlcDids(map);
-	await fetchWebDids(map);
+
+	console.log("Fetching DIDs");
+	const pdses = await fetchPdses();
+	await Promise.all(pdses.map((pds) => fetchPdsDids(pds, map)));
+	console.log(`Fetched ${map.size} DIDs`);
+
 	return map;
+}
+
+async function fetchPdsDids(pds: string, map: Map<string, string>): Promise<void> {
+	const url = new URL(`/xrpc/com.atproto.sync.listRepos`, pds).href;
+	let cursor = "";
+	while (true) {
+		try {
+			const res = await fetch(url + "?limit=1000&cursor=" + cursor);
+			if (!res.ok) {
+				if (res.status === 429) {
+					await processRatelimitHeaders(res.headers, url);
+					continue;
+				}
+				throw new Error(
+					`Failed to fetch DIDs from ${pds}: ${res.status} ${res.statusText}`,
+				);
+			}
+
+			const { cursor: _c, repos } = await res.json() as {
+				cursor: string;
+				repos: Array<{ did: string }>;
+			};
+			for (const repo of repos) {
+				map.set(repo.did, pds);
+			}
+
+			if (!_c) break;
+			cursor = _c;
+		} catch (err) {
+			if (err instanceof TypeError) {
+				console.warn(`listRepos failed for ${url} at cursor ${cursor}, skipping`);
+				throw err;
+			}
+		}
+	}
 }
 
 export async function getRepo(did: string, pds: string, attempt = 0): Promise<Uint8Array | null> {
@@ -49,53 +88,55 @@ export async function getRepo(did: string, pds: string, attempt = 0): Promise<Ui
 	}
 }
 
-async function fetchPlcDids(map: Map<string, string> = new Map()): Promise<Map<string, string>> {
-	let cursor = "";
-	do {
-		const res = await fetch(`https://plc.directory/export?limit=1000%after=${cursor}`);
-		if (!res.ok) {
-			if (res.status === 429) {
-				await sleep(10_000);
-				continue;
-			}
-			throw new Error(`Failed to fetch PLC DIDs: ${res.status} ${res.statusText}`);
-		}
-
-		const lines = await res.text();
-		const operations = lines.split("\n").map((line) => {
-			try {
-				return JSON.parse(line);
-			} catch (e) {
-				return null;
-			}
-		});
-
-		for (const op of operations) {
-			if (!op?.operation?.type) continue;
-			if (op.operation.type === "create" && op.operation.service) {
-				map.set(op.did, op.operation.service);
-			} else if (op.operation.type === "plc_operation") {
-				const pds = op.operation.services.atproto_pds.endpoint;
-				if (pds) map.set(op.did, pds);
-			} else if (op.operation.type === "plc_tombstone") map.delete(op.did);
-		}
-
-		cursor = operations.at(-1)?.createdAt;
-	} while (cursor);
-
-	return map;
-}
-
-async function fetchWebDids(map: Map<string, string> = new Map()): Promise<Map<string, string>> {
-	const data = await fetch(
-		"https://raw.githubusercontent.com/mary-ext/atproto-scraping/refs/heads/trunk/state.json",
-	).then((res) => res.ok ? res.json() as any : null);
-	if (!data?.firehose?.didWebs) throw new Error("Failed to fetch web DIDs");
-	for (const [did, { pds }] of Object.entries<{ pds: string }>(data.firehose.didWebs)) {
-		map.set(did, pds);
-	}
-	return map;
-}
+// async function fetchPlcDids(map: Map<string, string> = new Map()): Promise<Map<string, string>> {
+// 	let cursor = "";
+// 	while (true) {
+// 		console.log(`fetching plc dids, now ${map.size}`);
+// 		const res = await fetch(`https://plc.directory/export?limit=1000%after=${cursor}`);
+// 		if (!res.ok) {
+// 			if (res.status === 429) {
+// 				await sleep(10_000);
+// 				continue;
+// 			}
+// 			throw new Error(`Failed to fetch PLC DIDs: ${res.status} ${res.statusText}`);
+// 		}
+//
+// 		const lines = await res.text();
+// 		const operations = lines.split("\n").map((line) => {
+// 			try {
+// 				return JSON.parse(line);
+// 			} catch (e) {
+// 				return null;
+// 			}
+// 		});
+//
+// 		for (const op of operations) {
+// 			if (!op?.operation?.type) continue;
+// 			if (op.operation.type === "create" && op.operation.service) {
+// 				map.set(op.did, op.operation.service);
+// 			} else if (op.operation.type === "plc_operation") {
+// 				const pds = op.operation.services.atproto_pds.endpoint;
+// 				if (pds) map.set(op.did, pds);
+// 			} else if (op.operation.type === "plc_tombstone") map.delete(op.did);
+// 		}
+//
+// 		cursor = operations.at(-1)?.createdAt;
+// 		if (!cursor) break;
+// 	}
+//
+// 	return map;
+// }
+//
+// async function fetchWebDids(map: Map<string, string> = new Map()): Promise<Map<string, string>> {
+// 	const data = await fetch(
+// 		"https://raw.githubusercontent.com/mary-ext/atproto-scraping/refs/heads/trunk/state.json",
+// 	).then((res) => res.ok ? res.json() as any : null);
+// 	if (!data?.firehose?.didWebs) throw new Error("Failed to fetch web DIDs");
+// 	for (const [did, { pds }] of Object.entries<{ pds: string }>(data.firehose.didWebs)) {
+// 		map.set(did, pds);
+// 	}
+// 	return map;
+// }
 
 const ratelimitCooldowns = new Map<string, Promise<unknown>>();
 const backoffs = [1_000, 5_000, 15_000, 30_000, 60_000, 120_000, 300_000];

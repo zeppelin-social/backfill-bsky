@@ -6,7 +6,7 @@ import { createClient } from "@redis/client";
 import RedisQueue from "bee-queue";
 import * as fastq from "fastq";
 import { CID } from "multiformats/cid";
-import { fetchAllRepos, getRepo } from "../util/fetch.js";
+import { fetchAllDids, getRepo } from "../util/fetch.js";
 import { WorkerPool } from "../util/workerPool.js";
 
 declare global {
@@ -91,7 +91,7 @@ async function main() {
 		});
 	}, 150);
 
-	const repos = await fetchAllRepos();
+	const repos = await fetchAllDids();
 	for (const [did, pds] of repos) {
 		if (await redis.sIsMember("backfill:seen", did)) continue;
 		await getRepoQueue.push({ did, pds });
