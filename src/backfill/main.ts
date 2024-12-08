@@ -6,6 +6,7 @@ import { createClient } from "@redis/client";
 import RedisQueue from "bee-queue";
 import * as fastq from "fastq";
 import { CID } from "multiformats/cid";
+import fs from "node:fs";
 import { fetchAllDids, getRepo } from "../util/fetch.js";
 import { WorkerPool } from "../util/workerPool.js";
 
@@ -53,6 +54,7 @@ async function main() {
 	});
 
 	const redis = createClient();
+	await redis.connect();
 
 	// 100 concurrency queue to write records to the AppView database
 	const writeQueue = new RedisQueue<CommitData>("write records", {
@@ -91,7 +93,7 @@ async function main() {
 		});
 	}, 150);
 
-	const repos = await fetchAllDids();
+	const repos = await readOrFetchDids();
 	for (const [did, pds] of repos) {
 		if (await redis.sIsMember("backfill:seen", did)) continue;
 		await getRepoQueue.push({ did, pds });
@@ -99,3 +101,22 @@ async function main() {
 }
 
 void main();
+
+const readOrFetchDids = async () => {
+	try {
+		return new Map(
+			fs.readFileSync("dids.json", "utf-8").split("\n").map((line) =>
+				line.split(",") as [string, string]
+			),
+		);
+	} catch (err: any) {
+		if (err.code !== "ENOENT") throw err;
+		const dids = await fetchAllDids();
+		writeDids(dids);
+		return dids;
+	}
+};
+
+const writeDids = (dids: Iterable<[string, string]>) => {
+	fs.writeFileSync("dids.json", Array.from(dids).map(([did, pds]) => `${did},${pds}\n`).join(""));
+};
