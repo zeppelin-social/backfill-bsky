@@ -19,12 +19,10 @@ import { CID } from "multiformats/cid";
 import cluster from "node:cluster";
 import fs from "node:fs";
 import * as os from "node:os";
-import SharedNodeBuffer from "shared-node-buffer";
 import { Agent, setGlobalDispatcher } from "undici";
 import { fetchAllDids, sleep } from "../util/fetch.js";
 import type { CommitData } from "./main.js";
-
-type MasterToWorkerMessage = { type: "shm"; key: string };
+import * as shm from "shm-typed-array";
 
 const cacheable = new CacheableLookup();
 
@@ -50,7 +48,7 @@ const repoFetchingQueue = new Queue<{ did: string; pds: string }>("repo-fetching
 	removeOnSuccess: true,
 	removeOnFailure: true,
 });
-const repoProcessingQueue = new Queue<{ did: string; len: number }>("repo-processing", {
+const repoProcessingQueue = new Queue<{ did: string }>("repo-processing", {
 	removeOnSuccess: true,
 	removeOnFailure: true,
 });
@@ -81,7 +79,6 @@ if (cluster.isPrimary) {
 	await redis.connect();
 
 	const numCPUs = os.availableParallelism();
-	const cooldowns = new Map<string, number>();
 
 	for (let i = 0; i < numCPUs; i++) {
 		cluster.fork();
@@ -120,9 +117,8 @@ if (cluster.isPrimary) {
 		const { did, pds } = job.data;
 		const repo = await getRepo(pds, did as `did:${string}`);
 		if (repo) {
-			const buffer = new SharedNodeBuffer(did, repo.byteLength);
-			buffer.fill(repo);
-			await repoProcessingQueue.createJob({ did, len: repo.byteLength }).setId(did).save();
+			shm.create(repo.length, "Uint8Array", did);
+			await repoProcessingQueue.createJob({ did }).setId(did).save();
 		}
 	});
 
@@ -163,25 +159,17 @@ if (cluster.isPrimary) {
 	void main();
 } else {
 	repoProcessingQueue.process(async (job) => {
-		const { did, len } = job.data;
+		const { did } = job.data;
 
-		if (!did || typeof did !== "string" || !len || typeof len !== "number") {
+		if (!did || typeof did !== "string") {
 			console.warn(`Invalid job data for ${job.id}: ${JSON.stringify(job.data)}`);
 			return;
 		}
 
-		let repo = new Uint8Array(new SharedNodeBuffer(did, len));
-
-		if (!repo.length) {
-			for (let i = 0; i < 10; i++) {
-				await sleep(1000);
-				repo = new Uint8Array(new SharedNodeBuffer(did, len));
-				if (repo.length) break;
-			}
-			if (!repo.length) {
-				console.warn(`Did not get repo for ${did} after 10 seconds`);
-				return;
-			}
+		const repo = shm.get(did, "Uint8Array");
+		if (!repo?.byteLength) {
+			console.warn(`Did not get repo for ${did}`);
+			return;
 		}
 
 		try {
@@ -219,6 +207,8 @@ if (cluster.isPrimary) {
 			await writeJob.save();
 		} catch (err) {
 			console.warn(`iterateAtpRepo error for did ${did} --- ${err}`);
+		} finally {
+			shm.destroy(did);
 		}
 	});
 
