@@ -20,6 +20,7 @@
 	},
 	"dependencies": {
 		"@atcute/car": "^1.1.1",
+		"@atcute/client": "^2.0.6",
 		"@atcute/tid": "^1.0.1",
 		"@atproto/bsky": "^0.0.96",
 		"@atproto/identity": "^0.4.3",
