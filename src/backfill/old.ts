@@ -117,7 +117,8 @@ if (cluster.isPrimary) {
 		const { did, pds } = job.data;
 		const repo = await getRepo(pds, did as `did:${string}`);
 		if (repo) {
-			shm.create(repo.length, "Uint8Array", did);
+			const shared = shm.create(repo.length, "Uint8Array", did);
+			if (shared) shared.set(repo);
 			await repoProcessingQueue.createJob({ did }).setId(did).save();
 		}
 	});
