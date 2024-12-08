@@ -24,12 +24,7 @@ import { Agent, setGlobalDispatcher } from "undici";
 import { fetchAllDids, sleep } from "../util/fetch.js";
 import type { CommitData } from "./main.js";
 
-type WorkerToMasterMessage = { type: "checkCooldown"; pds: string } | {
-	type: "setCooldown";
-	pds: string;
-	until: number;
-};
-type MasterToWorkerMessage = { type: "cooldownResponse"; wait: boolean; waitTime?: number };
+type MasterToWorkerMessage = { type: "shm"; key: string };
 
 const cacheable = new CacheableLookup();
 
@@ -87,37 +82,6 @@ if (cluster.isPrimary) {
 
 	const numCPUs = os.availableParallelism();
 	const cooldowns = new Map<string, number>();
-
-	cluster.on("message", (worker, message: WorkerToMasterMessage) => {
-		switch (message.type) {
-			case "checkCooldown": {
-				const cooldownUntil = cooldowns.get(message.pds);
-				const now = Date.now();
-				if (cooldownUntil && cooldownUntil > now) {
-					worker.send(
-						{
-							type: "cooldownResponse",
-							wait: true,
-							waitTime: cooldownUntil - now,
-						} satisfies MasterToWorkerMessage,
-					);
-				} else {
-					worker.send(
-						{ type: "cooldownResponse", wait: false } satisfies MasterToWorkerMessage,
-					);
-				}
-				break;
-			}
-			case "setCooldown": {
-				cooldowns.set(message.pds, message.until);
-				break;
-			}
-			default: {
-				((_: never) => {})(message); // assert unreachable
-				break;
-			}
-		}
-	});
 
 	for (let i = 0; i < numCPUs; i++) {
 		cluster.fork();
@@ -207,7 +171,7 @@ if (cluster.isPrimary) {
 		}
 
 		let repo = new Uint8Array(new SharedNodeBuffer(did, len));
-		
+
 		if (!repo.length) {
 			for (let i = 0; i < 10; i++) {
 				await sleep(1000);
@@ -275,43 +239,9 @@ class WrappedRPC extends XRPC {
 	override async request(options: XRPCRequestOptions, attempt = 0): Promise<XRPCResponse> {
 		const url = new URL("/xrpc/" + options.nsid, this.service).href;
 
-		if (!cluster.isPrimary) {
-			await new Promise<void>((resolve) => {
-				if (!process.send) return;
-				process.send(
-					{ type: "checkCooldown", pds: this.service } satisfies WorkerToMasterMessage,
-				);
-
-				const handler = (message: MasterToWorkerMessage) => {
-					if (message.type === "cooldownResponse") {
-						process.off("message", handler);
-						if (message.wait && message.waitTime) {
-							sleep(message.waitTime + 1000).then(() => resolve());
-						} else {
-							resolve();
-						}
-					}
-				};
-
-				process.on("message", handler);
-			});
-		}
-
 		const request = async () => {
 			const res = await super.request(options);
-
-			if (!cluster.isPrimary) {
-				await processRatelimitHeaders(res.headers, url, (wait) => {
-					process.send!(
-						{
-							type: "setCooldown",
-							pds: this.service,
-							until: Date.now() + wait,
-						} satisfies WorkerToMasterMessage,
-					);
-				});
-			}
-
+			await processRatelimitHeaders(res.headers, url, sleep);
 			return res;
 		};
 
@@ -322,9 +252,7 @@ class WrappedRPC extends XRPC {
 
 			if (err instanceof XRPCError) {
 				if (err.status === 429) {
-					if (!cluster.isPrimary) {
-						await processRatelimitHeaders(err.headers, url, sleep);
-					}
+					await processRatelimitHeaders(err.headers, url, sleep);
 				} else throw err;
 			} else if (err instanceof TypeError) {
 				console.warn(`fetch failed for ${url}, skipping`);
