@@ -7,7 +7,6 @@ import RedisQueue from "bee-queue";
 import * as fastq from "fastq";
 import { CID } from "multiformats/cid";
 import fs from "node:fs";
-import readline from "node:readline/promises";
 import { fetchAllDids, getRepo } from "../util/fetch.js";
 import { WorkerPool } from "../util/workerPool.js";
 
@@ -57,23 +56,6 @@ async function main() {
 	const redis = createClient();
 	await redis.connect();
 
-	// 100 concurrency queue to write records to the AppView database
-	const writeQueue = new RedisQueue<CommitData>("write records", {
-		removeOnSuccess: true,
-		storeJobs: false,
-		redis,
-	});
-	writeQueue.process(100, (job) => {
-		const { uri, cid, indexedAt, record } = job.data;
-		return indexingSvc.indexRecord(
-			new AtUri(uri),
-			CID.parse(cid),
-			record,
-			WriteOpAction.Create,
-			indexedAt,
-		);
-	});
-
 	// Uses worker threads to parse repos
 	const workerPool = new WorkerPool<RepoWorkerMessage, Array<CommitData>>(
 		new URL("./repoWorker.js", import.meta.url).href,
@@ -87,16 +69,23 @@ async function main() {
 		workerPool.queueTask({ did, repoBytes }, (err, result) => {
 			if (err) return console.error(`Error when processing ${did}`, err);
 			console.log(`Writing ${result.length} records for ${did}`);
-			return Promise.allSettled(result.map((commit) => writeQueue.createJob(commit).save()))
+			return Promise.all(result.map(({ uri, cid, indexedAt, record }) => indexingSvc.indexRecord(
+				new AtUri(uri),
+				CID.parse(cid),
+				record,
+				WriteOpAction.Create,
+				indexedAt,
+			)))
 				.then(() => redis.sAdd("backfill:seen", did)).catch((err) =>
 					console.error(`Error when writing ${did}`, err)
 				);
 		});
-	}, 150);
+	}, 250);
 
 	const repos = await readOrFetchDids();
-	for (const [did, pds] of repos) {
-		if (await redis.sIsMember("backfill:seen", did)) continue;
+	const notSeen = await redis.smIsMember("backfill:seen", repos.map(repo => repo[0]))
+		.then(seen => repos.filter((_, i) => !seen[i]));
+	for (const [did, pds] of notSeen) {
 		getRepoQueue.push({ did, pds }).catch((err) =>
 			console.error(`Error when fetching ${did}`, err)
 		);
