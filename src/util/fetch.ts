@@ -48,11 +48,9 @@ async function fetchPdsDids(pds: string, map: Map<string, string>): Promise<void
 
 			if (!_c || _c === cursor) break;
 			cursor = _c;
-		} catch (err) {
-			if (err instanceof TypeError) {
-				console.warn(`listRepos failed for ${url} at cursor ${cursor}, skipping`);
-			}
-			throw err;
+		} catch (err: any) {
+			console.warn(`listRepos failed for ${url} at cursor ${cursor}, skipping`, err);
+			return;
 		}
 	}
 	console.log(`Fetched ${fetched} DIDs from ${pds}`);
@@ -72,7 +70,7 @@ export async function getRepo(did: string, pds: string, attempt = 0): Promise<Ui
 			throw res;
 		}
 		return new Uint8Array(await res.arrayBuffer());
-	} catch (err) {
+	} catch (err: any) {
 		if (attempt > backoffs.length) throw err;
 
 		// 400 = RepoDeactivated, RepoTakendown, or RepoNotFound
@@ -80,7 +78,7 @@ export async function getRepo(did: string, pds: string, attempt = 0): Promise<Ui
 			const body = await err.json() as { message?: string; error?: string };
 			console.error(body.message || body.error || `Unknown error for repo: ${did}`);
 			return null;
-		} else if (err instanceof TypeError) {
+		} else if (err instanceof TypeError || `${err}`.includes("Unable to connect")) {
 			console.warn(`fetch failed for ${url}, skipping`);
 			throw err;
 		}
