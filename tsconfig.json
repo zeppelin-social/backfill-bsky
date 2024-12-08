@@ -22,7 +22,10 @@
 		"noImplicitOverride": true,
 		"noImplicitAny": true,
 		"exactOptionalPropertyTypes": true,
-		"strict": true
+		"strict": true,
+
+		"outDir": "dist",
+		"rootDir": "src"
 	},
 	"include": ["./src/**/*.ts"]
 }
