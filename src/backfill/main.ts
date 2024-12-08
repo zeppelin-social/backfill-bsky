@@ -7,9 +7,9 @@ import RedisQueue from "bee-queue";
 import * as fastq from "fastq";
 import { CID } from "multiformats/cid";
 import fs from "node:fs";
+import readline from "node:readline/promises";
 import { fetchAllDids, getRepo } from "../util/fetch.js";
 import { WorkerPool } from "../util/workerPool.js";
-import readline from 'node:readline/promises'
 
 declare global {
 	namespace NodeJS {
@@ -76,7 +76,7 @@ async function main() {
 
 	// Uses worker threads to parse repos
 	const workerPool = new WorkerPool<RepoWorkerMessage, Array<CommitData>>(
-		new URL("./repoWorker.ts", import.meta.url).href,
+		new URL("./repoWorker.js", import.meta.url).href,
 	);
 
 	// 150 concurrency queue to fetch repos, queue for processing, then queue results for writing
@@ -97,7 +97,9 @@ async function main() {
 	const repos = await readOrFetchDids();
 	for (const [did, pds] of repos) {
 		if (await redis.sIsMember("backfill:seen", did)) continue;
-		getRepoQueue.push({ did, pds }).catch((err) => console.error(`Error when fetching ${did}`, err));
+		getRepoQueue.push({ did, pds }).catch((err) =>
+			console.error(`Error when fetching ${did}`, err)
+		);
 	}
 }
 
@@ -106,10 +108,7 @@ void main();
 const readOrFetchDids = async () => {
 	try {
 		const rs = fs.createReadStream("dids.json");
-		const rl = readline.createInterface({
-			input: rs,
-			crlfDelay: Infinity
-		});
+		const rl = readline.createInterface({ input: rs, crlfDelay: Infinity });
 		const dids = new Map<string, string>();
 		for await (const line of rl) {
 			const [did, pds] = line.split(",");
