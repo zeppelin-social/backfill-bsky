@@ -78,10 +78,12 @@ async function main() {
 
 	// 150 concurrency queue to fetch repos, queue for processing, then queue results for writing
 	const getRepoQueue = fastq.promise(async ({ did, pds }: { did: string; pds: string }) => {
+		console.log(`Fetching repo for ${did}`);
 		const repoBytes = await getRepo(did, pds);
 		if (!repoBytes?.length) return;
 		workerPool.queueTask({ did, repoBytes }, (err, result) => {
 			if (err) return console.error(`Error when processing ${did}`, err);
+			console.log(`Writing ${result.length} records for ${did}`);
 			return Promise.allSettled(result.map((commit) => writeQueue.createJob(commit).save()))
 				.then(() => redis.sAdd("backfill:seen", did)).catch((err) =>
 					console.error(`Error when writing ${did}`, err)
