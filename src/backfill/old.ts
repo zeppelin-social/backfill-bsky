@@ -206,7 +206,19 @@ if (cluster.isPrimary) {
 			return;
 		}
 
-		const repo = new SharedNodeBuffer(did, len);
+		let repo = new Uint8Array(new SharedNodeBuffer(did, len));
+		
+		if (!repo.length) {
+			for (let i = 0; i < 10; i++) {
+				await sleep(1000);
+				repo = new Uint8Array(new SharedNodeBuffer(did, len));
+				if (repo.length) break;
+			}
+			if (!repo.length) {
+				console.warn(`Did not get repo for ${did} after 10 seconds`);
+				return;
+			}
+		}
 
 		try {
 			const out = [];
