@@ -1,39 +1,39 @@
 {
-  "name": "backfill-bsky",
-  "type": "module",
-  "scripts": {
-    "backfill": "bun src/backfill/main.ts",
-    "buffer": "bun src/buffer/main.ts",
-    "buffer:ingest": "bun src/buffer/ingest.ts",
-    "request-crawl": "bun src/requestCrawlPdses.ts",
-    "index-repos": "bun src/indexRepos.ts"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "devDependencies": {
-    "@types/node": "^22.9.4",
-    "@types/pg": "^8.11.10",
-    "dprint": "^0.47.5",
-    "tsx": "^4.19.2",
-    "typescript": "^5.7.2"
-  },
-  "dependencies": {
-    "@atcute/car": "^1.1.1",
-    "@atcute/client": "^2.0.6",
-    "@atcute/tid": "^1.0.1",
-    "@atproto/bsky": "^0.0.96",
-    "@atproto/identity": "^0.4.3",
-    "@atproto/repo": "^0.5.5",
-    "@atproto/sync": "^0.1.6",
-    "@atproto/syntax": "^0.3.1",
-    "@redis/client": "^1.6.0",
-    "bee-queue": "^1.7.1",
-    "cacheable-lookup": "^7.0.0",
-    "fastq": "^1.17.1",
-    "multiformats": "^13.3.1",
-    "pg": "^8.13.1",
-    "shm-typed-array": "0.1.1",
-    "undici": "^6.21.0"
-  }
+	"name": "backfill-bsky",
+	"type": "module",
+	"scripts": {
+		"backfill": "bun src/backfill/main.ts",
+		"buffer": "bun src/buffer/main.ts",
+		"buffer:ingest": "bun src/buffer/ingest.ts",
+		"request-crawl": "bun src/requestCrawlPdses.ts",
+		"index-repos": "bun src/indexRepos.ts"
+	},
+	"keywords": [],
+	"author": "",
+	"license": "ISC",
+	"devDependencies": {
+		"@types/node": "^22.9.4",
+		"@types/pg": "^8.11.10",
+		"dprint": "^0.47.5",
+		"tsx": "^4.19.2",
+		"typescript": "^5.7.2"
+	},
+	"dependencies": {
+		"@atcute/car": "^1.1.1",
+		"@atcute/client": "^2.0.6",
+		"@atcute/tid": "^1.0.1",
+		"@atproto/bsky": "^0.0.96",
+		"@atproto/identity": "^0.4.3",
+		"@atproto/repo": "^0.5.5",
+		"@atproto/sync": "^0.1.6",
+		"@atproto/syntax": "^0.3.1",
+		"@redis/client": "^1.6.0",
+		"bee-queue": "^1.7.1",
+		"cacheable-lookup": "^7.0.0",
+		"fastq": "^1.17.1",
+		"multiformats": "^13.3.1",
+		"pg": "^8.13.1",
+		"shm-typed-array": "0.1.1",
+		"undici": "^6.21.0"
+	}
 }

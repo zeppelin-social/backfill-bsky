@@ -10,7 +10,6 @@ import {
 import { parse as parseTID } from "@atcute/tid";
 import * as bsky from "@atproto/bsky";
 import { IdResolver, MemoryCache } from "@atproto/identity";
-import { WriteOpAction } from "@atproto/repo";
 import { AtUri } from "@atproto/syntax";
 import { createClient } from "@redis/client";
 import Queue from "bee-queue";
@@ -19,10 +18,10 @@ import { CID } from "multiformats/cid";
 import cluster from "node:cluster";
 import fs from "node:fs";
 import * as os from "node:os";
+import * as shm from "shm-typed-array";
 import { Agent, setGlobalDispatcher } from "undici";
 import { fetchAllDids, sleep } from "../util/fetch.js";
 import type { CommitData } from "./main.js";
-import * as shm from "shm-typed-array";
 
 const cacheable = new CacheableLookup();
 
@@ -102,19 +101,18 @@ if (cluster.isPrimary) {
 				const insertHandle = idx.indexHandle(did, new Date().toISOString());
 				const insertRecords = out.map(({ uri: _uri, cid, indexedAt, record }) => {
 					const uri = new AtUri(_uri);
-					const indexer = idx.findIndexerForCollection(uri.collection)
+					const indexer = idx.findIndexerForCollection(uri.collection);
 					if (indexer) {
-						return indexer.insertRecord(uri, CID.parse(cid), record, indexedAt)
+						return indexer.insertRecord(uri, CID.parse(cid), record, indexedAt);
 					}
 				});
-				await Promise.allSettled([insertHandle, ...insertRecords])
-			}).then(() =>
-				redis.sAdd("backfill:seen", did)
-			).catch((err) => console.error(`Error when writing ${did}`, err)).finally(() => {
-					console.timeEnd(`Writing records: ${out.length} for ${did}`);
-					done(null)
-				}
-			);
+				await Promise.allSettled([insertHandle, ...insertRecords]);
+			}).then(() => redis.sAdd("backfill:seen", did)).catch((err) =>
+				console.error(`Error when writing ${did}`, err)
+			).finally(() => {
+				console.timeEnd(`Writing records: ${out.length} for ${did}`);
+				done(null);
+			});
 		},
 	);
 
@@ -179,7 +177,7 @@ if (cluster.isPrimary) {
 			console.warn(`Did not get repo for ${did}`);
 			return;
 		}
-		
+
 		console.time(`Processing repo: ${did}`);
 
 		try {

@@ -61,41 +61,47 @@ async function main() {
 	);
 
 	// 200 concurrency queue to fetch repos, queue for processing, then write results
-	const getRepoQueue = new RedisQueue<{ did: string; pds: string }>(
-		"getRepo",
-		{ removeOnSuccess: true, storeJobs: false }
-	);
-	getRepoQueue.process(1000,  (job, done) => {
+	const getRepoQueue = new RedisQueue<{ did: string; pds: string }>("getRepo", {
+		removeOnSuccess: true,
+		storeJobs: false,
+	});
+	getRepoQueue.process(500, (job, done) => {
 		const { did, pds } = job.data;
 		console.log(`Fetching repo for ${did}`);
-		getRepo(did, pds).then(repoBytes => {
+		getRepo(did, pds).then((repoBytes) => {
 			if (!repoBytes?.length) return done(null);
 			workerPool.queueTask({ did, repoBytes }, (err, result) => {
-				if (err) return console.error(`Error when processing ${ did }`, err);
-				console.log(`Writing ${ result.length } records for ${ did }`);
-				return Promise.all(result.map(({ uri, cid, indexedAt, record }) => indexingSvc.indexRecord(
-					new AtUri(uri),
-					CID.parse(cid),
-					record,
-					WriteOpAction.Create,
-					indexedAt,
-				)))
-					.then(() => redis.sAdd("backfill:seen", did)).catch((err) =>
-						console.error(`Error when writing ${ did }`, err)
-					).finally(() => done(null));
+				if (err) return console.error(`Error when processing ${did}`, err);
+				console.log(`Writing ${result.length} records for ${did}`);
+				return Promise.all(
+					result.map(({ uri, cid, indexedAt, record }) =>
+						indexingSvc.indexRecord(
+							new AtUri(uri),
+							CID.parse(cid),
+							record,
+							WriteOpAction.Create,
+							indexedAt,
+						)
+					),
+				).then(() => redis.sAdd("backfill:seen", did)).catch((err) =>
+					console.error(`Error when writing ${did}`, err)
+				).finally(() => done(null));
 			});
 		});
-	})
-	
+	});
+
 	console.log("Reading DIDs");
 	const repos = await readOrFetchDids();
 	console.log(`Filtering out seen DIDs from ${repos.length} total`);
-	const notSeen = await redis.smIsMember("backfill:seen", repos.map(repo => repo[0]))
-		.then(seen => repos.filter((_, i) => !seen[i]));
+	const notSeen = await redis.smIsMember("backfill:seen", repos.map((repo) => repo[0])).then((
+		seen,
+	) => repos.filter((_, i) => !seen[i]));
 	console.log(`Queuing ${notSeen.length} repos for processing`);
 	for (const dids of batch(notSeen, 1000)) {
 		console.log(`Queuing ${dids.length} repos`);
-		const errors = await getRepoQueue.saveAll(dids.map(([did, pds ]) => getRepoQueue.createJob({ did, pds })))
+		const errors = await getRepoQueue.saveAll(
+			dids.map(([did, pds]) => getRepoQueue.createJob({ did, pds })),
+		);
 		for (const [job, err] of errors) {
 			console.error(`Failed to queue repo ${job.data.did}`, err);
 		}
@@ -124,4 +130,4 @@ const batch = <T>(array: Array<T>, size: number): Array<Array<T>> => {
 		result.push(array.slice(i, i + size));
 	}
 	return result;
-}
+};

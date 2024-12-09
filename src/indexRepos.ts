@@ -44,7 +44,7 @@ async function main() {
 	const indexingSvc = sub.indexingSvc;
 
 	for (const did of process.argv.slice(2)) {
-		await indexingSvc.indexHandle(did, new Date().toISOString())
+		await indexingSvc.indexHandle(did, new Date().toISOString());
 		await indexingSvc.indexRepo(did);
 	}
 }
