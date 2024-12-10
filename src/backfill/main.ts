@@ -14,6 +14,7 @@ import { AtUri } from "@atproto/syntax";
 import { createClient } from "@redis/client";
 import Queue from "bee-queue";
 import CacheableLookup from "cacheable-lookup";
+import { pack, unpack } from "msgpackr";
 import { CID } from "multiformats/cid";
 import cluster from "node:cluster";
 import fs from "node:fs";
@@ -22,7 +23,6 @@ import PQueue from "p-queue";
 import * as shm from "shm-typed-array";
 import { Agent, setGlobalDispatcher } from "undici";
 import { fetchAllDids, sleep } from "../util/fetch.js";
-import { pack, unpack } from "msgpackr";
 
 declare global {
 	namespace NodeJS {
@@ -282,7 +282,7 @@ async function readOrFetchDids(): Promise<Array<[string, string]>> {
 }
 
 function writeDids(dids: Array<[string, string]>) {
-	fs.writeFileSync("dids.cache", pack(shuffle(dids)));
+	fs.writeFileSync("dids.cache", pack(dids));
 }
 
 const backoffs = [1_000, 5_000, 15_000, 30_000, 60_000, 120_000, 300_000];
@@ -311,10 +311,3 @@ async function processRatelimitHeaders(
 		}
 	}
 }
-
-// https://stackoverflow.com/a/56756447
-const shuffle = <T>(arr: T[]): T[] =>
-	arr.reduceRight<T[]>(
-		(r, _, __, s) => (r.push(s.splice(0 | Math.random() * s.length, 1)[0]), r),
-		[],
-	);

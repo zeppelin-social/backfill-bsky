@@ -44,6 +44,9 @@ importers:
       fastq:
         specifier: ^1.17.1
         version: 1.17.1
+      large-map:
+        specifier: ^1.0.0
+        version: 1.0.0
       msgpackr:
         specifier: ^1.11.2
         version: 1.11.2
@@ -1109,6 +1112,9 @@ packages:
   kysely@0.22.0:
     resolution: {integrity: sha512-ZE3qWtnqLOalodzfK5QUEcm7AEulhxsPNuKaGFsC3XiqO92vMLm+mAHk/NnbSIOtC4RmGm0nsv700i8KDp1gfQ==}
     engines: {node: '>=14.0.0'}
+
+  large-map@1.0.0:
+    resolution: {integrity: sha512-v95mXC+Ji78l6yC1RrY5zgB6DaPFZ/CpI+pr8lZovIR57B/QzE4dO5RiendnPfkof6+kCt2rbQlVT8xmBQAhgw==}
 
   lodash.defaults@4.2.0:
     resolution: {integrity: sha512-qjxPLHd3r5DnsdGacqOMU6pb/avJzdh9tFX2ymgoZE27BmjXrNy/y4LoaiTeAb+O3gL8AfpJGtqfX/ae2leYYQ==}
@@ -2849,6 +2855,8 @@ snapshots:
       elliptic: 6.6.1
 
   kysely@0.22.0: {}
+
+  large-map@1.0.0: {}
 
   lodash.defaults@4.2.0: {}
 

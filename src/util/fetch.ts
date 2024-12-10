@@ -1,3 +1,5 @@
+import LargeMap from "large-map";
+
 export async function fetchPdses(): Promise<Array<string>> {
 	const data = await fetch(
 		"https://raw.githubusercontent.com/mary-ext/atproto-scraping/refs/heads/trunk/state.json",
@@ -12,15 +14,15 @@ export async function fetchPdses(): Promise<Array<string>> {
 export async function fetchAllDids(): Promise<Array<[string, string]>> {
 	console.log("Fetching DIDs");
 	const pdses = await fetchPdses();
-	const dids = (await Promise.all(pdses.map(fetchPdsDids))).flat();
-	console.log(`Fetched ${dids.length} DIDs`);
+	const dids = new LargeMap<string, string>();
+	await Promise.all(pdses.map((pds) => fetchPdsDids(pds, dids)));
+	console.log(`Fetched ${dids.size} DIDs`);
 
-	return dids;
+	return Array.from(dids.entries());
 }
 
-async function fetchPdsDids(pds: string): Promise<Array<[string, string]>> {
+async function fetchPdsDids(pds: string, map: LargeMap<string, string>) {
 	const url = new URL(`/xrpc/com.atproto.sync.listRepos`, pds).href;
-	const map = new Map<string, string>();
 	let cursor = "";
 	let fetched = 0;
 	while (true) {
@@ -53,7 +55,6 @@ async function fetchPdsDids(pds: string): Promise<Array<[string, string]>> {
 		}
 	}
 	console.log(`Fetched ${fetched} DIDs from ${pds}`);
-	return Array.from(map.entries());
 }
 
 export async function getRepo(did: string, pds: string, attempt = 0): Promise<Uint8Array | null> {
