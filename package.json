@@ -2,11 +2,12 @@
 	"name": "backfill-bsky",
 	"type": "module",
 	"scripts": {
-		"backfill": "bun src/backfill/main.ts",
-		"buffer": "bun src/buffer/main.ts",
-		"buffer:ingest": "bun src/buffer/ingest.ts",
-		"request-crawl": "bun src/requestCrawlPdses.ts",
-		"index-repos": "bun src/indexRepos.ts"
+		"build": "tsc",
+		"backfill": "node dist/backfill/main.js",
+		"buffer": "node dist/buffer/main.js",
+		"buffer:ingest": "node dist/buffer/ingest.js",
+		"request-crawl": "node dist/requestCrawlPdses.js",
+		"index-repos": "node dist/indexRepos.js"
 	},
 	"keywords": [],
 	"author": "",
