@@ -110,12 +110,12 @@ if (cluster.isPrimary) {
 		console.log("Reading DIDs");
 		const repos = await readOrFetchDids();
 		console.log(`Filtering out seen DIDs from ${repos.length} total`);
-		const notSeen = await redis.smIsMember("backfill:seen", repos.map((repo) => repo[0])).then((
-			seen,
-		) => repos.filter((_, i) => !seen[i]));
 
-		console.log(`Queuing ${notSeen.length} repos for processing`);
-		for (const [did, pds] of notSeen) {
+		const seenDids = new Set(await redis.sMembers("backfill:seen"));
+
+		console.log(`Queuing ${repos.length} repos for processing`);
+		for (const [did, pds] of repos) {
+			if (seenDids.has(did)) continue;
 			await fetchQueue.onSizeLessThan(100);
 			void fetchQueue.add(() => queueRepo(pds, did)).catch((e) =>
 				console.error(`Error queuing repo for ${did} `, e)
