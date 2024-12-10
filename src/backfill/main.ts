@@ -174,13 +174,15 @@ if (cluster.isPrimary) {
 			const insertHandle = indexingSvc.indexHandle(did, new Date().toISOString());
 			const insertRecords = indexingSvc.db.transaction(async (txn) => {
 				const indexingTx = indexingSvc.transact(txn);
-				for (const { uri: _uri, cid, indexedAt, record } of commits) {
-					const uri = new AtUri(_uri);
-					const indexer = indexingTx.findIndexerForCollection(uri.collection);
-					if (indexer) {
-						return indexer.insertRecord(uri, CID.parse(cid), record, indexedAt);
-					}
-				}
+				await Promise.allSettled(
+					commits.map(async ({ uri: _uri, cid, indexedAt, record }) => {
+						const uri = new AtUri(_uri);
+						const indexer = indexingTx.findIndexerForCollection(uri.collection);
+						if (indexer) {
+							return indexer.insertRecord(uri, CID.parse(cid), record, indexedAt);
+						}
+					}),
+				);
 			});
 
 			try {
