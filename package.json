@@ -32,6 +32,7 @@
 		"bee-queue": "^1.7.1",
 		"cacheable-lookup": "^7.0.0",
 		"fastq": "^1.17.1",
+		"msgpackr": "^1.11.2",
 		"multiformats": "^13.3.1",
 		"p-queue": "^8.0.1",
 		"pg": "^8.13.1",

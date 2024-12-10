@@ -22,6 +22,7 @@ import PQueue from "p-queue";
 import * as shm from "shm-typed-array";
 import { Agent, setGlobalDispatcher } from "undici";
 import { fetchAllDids, sleep } from "../util/fetch.js";
+import { pack, unpack } from "msgpackr";
 
 declare global {
 	namespace NodeJS {
@@ -97,7 +98,7 @@ if (cluster.isPrimary) {
 		) => repos.filter((_, i) => !seen[i]));
 
 		console.log(`Queuing ${notSeen.length} repos for processing`);
-		for (const [did, pds] of shuffle(notSeen)) {
+		for (const [did, pds] of notSeen) {
 			await fetchQueue.onSizeLessThan(100);
 			void fetchQueue.add(() => queueRepo(pds, did)).catch((e) =>
 				console.error(`Error queuing repo for ${did} `, e)
@@ -272,7 +273,7 @@ async function queueRepo(pds: string, did: string) {
 
 async function readOrFetchDids(): Promise<Array<[string, string]>> {
 	try {
-		return JSON.parse(fs.readFileSync("dids.json", "utf-8"));
+		return unpack(fs.readFileSync("dids.cache"));
 	} catch (err: any) {
 		const dids = await fetchAllDids();
 		writeDids(dids);
@@ -281,7 +282,7 @@ async function readOrFetchDids(): Promise<Array<[string, string]>> {
 }
 
 function writeDids(dids: Array<[string, string]>) {
-	fs.writeFileSync("dids.json", JSON.stringify(dids));
+	fs.writeFileSync("dids.cache", pack(shuffle(dids)));
 }
 
 const backoffs = [1_000, 5_000, 15_000, 30_000, 60_000, 120_000, 300_000];
