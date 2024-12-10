@@ -1,4 +1,6 @@
 import LargeMap from "large-map";
+import Errors from "undici/types/errors";
+import UndiciError = Errors.UndiciError;
 
 export async function fetchPdses(): Promise<Array<string>> {
 	const data = await fetch(
@@ -50,7 +52,26 @@ async function fetchPdsDids(pds: string, map: LargeMap<string, string>) {
 			if (!_c || _c === cursor) break;
 			cursor = _c;
 		} catch (err: any) {
-			console.warn(`listRepos failed for ${url} at cursor ${cursor}, skipping`, err);
+			const undiciError = err instanceof UndiciError
+				? err
+				: (err instanceof Error && err.cause instanceof UndiciError)
+				? err.cause
+				: null;
+			if (
+				[
+					"ETIMEDOUT",
+					"UND_ERR_CONNECT_TIMEOUT",
+					"UND_ERR_HEADERS_TIMEOUT",
+					"UND_ERR_SOCKET",
+				].includes(undiciError?.code ?? "")
+			) {
+				console.warn(`Could not connect to ${url} for listRepos, skipping`);
+			} else {
+				console.warn(
+					`listRepos failed for ${url} at cursor ${cursor}, skipping`,
+					err instanceof Error ? err.message : err,
+				);
+			}
 			break;
 		}
 	}

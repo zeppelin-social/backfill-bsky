@@ -21,7 +21,7 @@ import fs from "node:fs";
 import * as os from "node:os";
 import PQueue from "p-queue";
 import * as shm from "shm-typed-array";
-import { Agent, setGlobalDispatcher } from "undici";
+import { Agent, RetryAgent, setGlobalDispatcher } from "undici";
 import { fetchAllDids, sleep } from "../util/fetch.js";
 
 declare global {
@@ -48,21 +48,38 @@ for (
 const cacheable = new CacheableLookup();
 
 setGlobalDispatcher(
-	new Agent({
-		keepAliveTimeout: 300_000,
-		connect: {
-			timeout: 300_000,
-			lookup: (hostname, { family: _family, hints, all, ..._options }, callback) => {
-				const family = !_family ? undefined : (_family === 6 || _family === "IPv6") ? 6 : 4;
-				return cacheable.lookup(hostname, {
-					..._options,
-					...(family ? { family } : {}),
-					...(hints ? { hints } : {}),
-					...(all ? { all } : {}),
-				}, callback);
+	new RetryAgent(
+		new Agent({
+			keepAliveTimeout: 30_000,
+			connect: {
+				timeout: 30_000,
+				lookup: (hostname, { family: _family, hints, all, ..._options }, callback) => {
+					const family = !_family
+						? undefined
+						: (_family === 6 || _family === "IPv6")
+						? 6
+						: 4;
+					return cacheable.lookup(hostname, {
+						..._options,
+						...(family ? { family } : {}),
+						...(hints ? { hints } : {}),
+						...(all ? { all } : {}),
+					}, callback);
+				},
 			},
+		}),
+		{
+			errorCodes: [
+				"ECONNRESET",
+				"ECONNREFUSED",
+				"ETIMEDOUT",
+				"ENETDOWN",
+				"ENETUNREACH",
+				"EHOSTDOWN",
+				"UND_ERR_SOCKET",
+			],
 		},
-	}),
+	),
 );
 
 type CommitData = { uri: string; cid: string; indexedAt: string; record: unknown };
