@@ -18,10 +18,10 @@ import { CID } from "multiformats/cid";
 import cluster from "node:cluster";
 import fs from "node:fs";
 import * as os from "node:os";
+import PQueue from "p-queue";
 import * as shm from "shm-typed-array";
 import { Agent, setGlobalDispatcher } from "undici";
 import { fetchAllDids, sleep } from "../util/fetch.js";
-import PQueue from 'p-queue'
 
 declare global {
 	namespace NodeJS {
@@ -86,7 +86,7 @@ if (cluster.isPrimary) {
 		cluster.fork();
 	});
 
-	const fetchQueue = new PQueue({ concurrency: 100 })
+	const fetchQueue = new PQueue({ concurrency: 100 });
 
 	async function main() {
 		console.log("Reading DIDs");
@@ -97,10 +97,11 @@ if (cluster.isPrimary) {
 		) => repos.filter((_, i) => !seen[i]));
 
 		console.log(`Queuing ${notSeen.length} repos for processing`);
-		for (const [did, pds] of notSeen) {
+		for (const [did, pds] of shuffle(notSeen)) {
 			await fetchQueue.onSizeLessThan(100);
-			void fetchQueue.add(() => queueRepo(pds, did))
-			.catch((e) => console.error(`Error queuing repo for ${did} `, e));
+			void fetchQueue.add(() => queueRepo(pds, did)).catch((e) =>
+				console.error(`Error queuing repo for ${did} `, e)
+			);
 		}
 	}
 
@@ -301,8 +302,16 @@ async function processRatelimitHeaders(
 			const now = Date.now();
 			const waitTime = ratelimitReset - now + 1000; // add 1s to be safe
 			if (waitTime > 0) {
+				console.log("Rate limited at " + url + ", waiting " + waitTime + "ms");
 				await onRatelimit(waitTime);
 			}
 		}
 	}
 }
+
+// https://stackoverflow.com/a/56756447
+const shuffle = <T>(arr: T[]): T[] =>
+	arr.reduceRight<T[]>(
+		(r, _, __, s) => (r.push(s.splice(0 | Math.random() * s.length, 1)[0]), r),
+		[],
+	);
