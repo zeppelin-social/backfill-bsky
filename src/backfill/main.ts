@@ -1,13 +1,28 @@
+import { iterateAtpRepo } from "@atcute/car";
+import {
+	type HeadersObject,
+	simpleFetchHandler,
+	XRPC,
+	XRPCError,
+	type XRPCRequestOptions,
+	type XRPCResponse,
+} from "@atcute/client";
+import { parse as parseTID } from "@atcute/tid";
 import * as bsky from "@atproto/bsky";
 import { IdResolver, MemoryCache } from "@atproto/identity";
-import { WriteOpAction } from "@atproto/repo";
 import { AtUri } from "@atproto/syntax";
 import { createClient } from "@redis/client";
-import RedisQueue from "bee-queue";
+import Queue from "bee-queue";
+import fastq from "fastq";
+import CacheableLookup from "cacheable-lookup";
 import { CID } from "multiformats/cid";
+import cluster from "node:cluster";
 import fs from "node:fs";
-import { fetchAllDids, getRepo } from "../util/fetch.js";
-import { WorkerPool } from "../util/workerPool.js";
+import * as os from "node:os";
+import * as shm from "shm-typed-array";
+import { Agent, setGlobalDispatcher } from "undici";
+import { fetchAllDids, sleep } from "../util/fetch.js";
+import type { CommitData } from "./main.js";
 
 declare global {
 	namespace NodeJS {
@@ -15,102 +30,252 @@ declare global {
 			BSKY_DB_POSTGRES_URL: string;
 			BSKY_DB_POSTGRES_SCHEMA: string;
 			BSKY_REPO_PROVIDER: string;
-			BSKY_DID_PLC_URL: string;
 		}
 	}
 }
 
 for (
 	const envVar of [
-		"BSKY_DB_POSTGRES_URL",
-		"BSKY_DB_POSTGRES_SCHEMA",
-		"BSKY_REPO_PROVIDER",
-		"BSKY_DID_PLC_URL",
-	]
-) {
+	"BSKY_DB_POSTGRES_URL",
+	"BSKY_DB_POSTGRES_SCHEMA",
+	"BSKY_REPO_PROVIDER",
+	"BSKY_DID_PLC_URL",
+]
+	) {
 	if (!process.env[envVar]) throw new Error(`Missing env var ${envVar}`);
 }
 
-export type RepoWorkerMessage = { did: string; repoBytes: Uint8Array };
-export type CommitData = { uri: string; cid: string; indexedAt: string; record: unknown };
+const cacheable = new CacheableLookup();
 
-async function main() {
+setGlobalDispatcher(
+	new Agent({
+		keepAliveTimeout: 300_000,
+		connect: {
+			timeout: 300_000,
+			lookup: (hostname, { family: _family, hints, all, ..._options }, callback) => {
+				const family = !_family ? undefined : (_family === 6 || _family === "IPv6") ? 6 : 4;
+				return cacheable.lookup(hostname, {
+					..._options,
+					...(family ? { family } : {}),
+					...(hints ? { hints } : {}),
+					...(all ? { all } : {}),
+				}, callback);
+			},
+		},
+	}),
+);
+
+const queue = new Queue<{ did: string }>("repo-processing", {
+	removeOnSuccess: true,
+	removeOnFailure: true,
+});
+
+const redis = createClient();
+await redis.connect();
+
+if (cluster.isPrimary) {
+	const numCPUs = os.availableParallelism();
+
+	for (let i = 0; i < numCPUs; i++) {
+		cluster.fork();
+	}
+
+	cluster.on("exit", (worker, code, signal) => {
+		console.error(`${worker.process.pid} died with code ${code} and signal ${signal}`);
+		cluster.fork();
+	});
+	
+	const repoFetchQueue = fastq.promise<null, { did: string; pds: string }>(async function ({ did, pds }) {
+		console.time(`Fetching repo: ${did}`);
+		try {
+		const repo = await getRepo(pds, did);
+		if (repo) {
+			const shared = shm.create(repo.length, "Uint8Array", did);
+			if (shared) shared.set(repo);
+			await queue.createJob({ did }).setId(did).save();
+		}
+		} catch (err) {
+			console.error(`Error fetching repo for ${did} --- ${err}`);
+			if (err instanceof XRPCError) {
+				if (err.name === "RepoDeactivated" || err.name === "RepoTakendown" || err.name === "RepoNotFound") {
+					await redis.sAdd("backfill:seen", did);
+				}
+			}
+		} finally {
+			console.timeEnd(`Fetching repo: ${ did }`);
+		}
+	}, 200);
+
+	async function main() {
+		console.log("Reading DIDs");
+		const repos = await readOrFetchDids();
+		console.log(`Filtering out seen DIDs from ${repos.length} total`);
+		const notSeen = await redis.smIsMember("backfill:seen", repos.map((repo) => repo[0])).then((
+			seen,
+		) => repos.filter((_, i) => !seen[i]));
+		
+		console.log(`Queuing ${notSeen.length} repos for processing`);
+		for (const [did, pds] of notSeen) {
+			await repoFetchQueue.push({ did, pds });
+		}
+
+		await new Promise<void>((resolve) => {
+			const checkQueue = async () => {
+				const jobCounts = await queue.checkHealth();
+				if (
+					jobCounts.waiting === 0 && jobCounts.active === 0
+				) {
+					resolve();
+				} else {
+					setTimeout(checkQueue, 1000);
+				}
+			};
+			checkQueue();
+		});
+	}
+
+	void main();
+} else {
 	const db = new bsky.Database({
 		url: process.env.BSKY_DB_POSTGRES_URL,
 		schema: process.env.BSKY_DB_POSTGRES_SCHEMA,
-		poolSize: 50,
+		poolSize: 5,
 	});
-
+	
 	const idResolver = new IdResolver({
 		plcUrl: process.env.BSKY_DID_PLC_URL,
 		didCache: new MemoryCache(),
 	});
-
+	
 	const { indexingSvc } = new bsky.RepoSubscription({
 		service: process.env.BSKY_REPO_PROVIDER,
 		db,
 		idResolver,
 	});
+	
+	queue.process(5, async (job) => {
+		const { did } = job.data;
 
-	const redis = createClient();
-	await redis.connect();
+		if (!did || typeof did !== "string") {
+			console.warn(`Invalid job data for ${job.id}: ${JSON.stringify(job.data)}`);
+			return;
+		}
 
-	// Uses worker threads to parse repos
-	const workerPool = new WorkerPool<RepoWorkerMessage, Array<CommitData>>(
-		new URL("./repoWorker.js", import.meta.url).href,
-	);
+		const repo = shm.get(did, "Uint8Array");
+		if (!repo?.byteLength) {
+			console.warn(`Did not get repo for ${did}`);
+			return;
+		}
 
-	// 200 concurrency queue to fetch repos, queue for processing, then write results
-	const getRepoQueue = new RedisQueue<{ did: string; pds: string }>("getRepo", {
-		removeOnSuccess: true,
-		storeJobs: false,
+
+		try {
+			console.time(`Processing repo: ${did}`);
+			const commits: CommitData[] = [];
+			const now = Date.now();
+			for await (const { record, rkey, collection, cid } of iterateAtpRepo(repo)) {
+				const uri = `at://${did}/${collection}/${rkey}`;
+
+				// This should be the date the AppView saw the record, but since we don't want the "archived post" label
+				// to show for every post in social-app, we'll try our best to figure out when the record was actually created.
+				// So first we try createdAt then parse the rkey; if either of those is in the future, we'll use now.
+				let indexedAt: number =
+					(!!record && typeof record === "object" && "createdAt" in record
+						&& typeof record.createdAt === "string"
+						&& new Date(record.createdAt).getTime()) || 0;
+				if (!indexedAt || isNaN(indexedAt)) {
+					try {
+						indexedAt = parseTID(rkey).timestamp;
+					} catch {
+						indexedAt = now;
+					}
+				}
+				if (indexedAt > now) indexedAt = now;
+
+				commits.push({
+					uri,
+					cid: cid.$link,
+					indexedAt: new Date(indexedAt).toISOString(),
+					record,
+				});
+			}
+			console.timeEnd(`Processing repo: ${did}`);
+			
+			console.time(`Writing records: ${commits.length} for ${did}`);
+			const insertHandle = indexingSvc.indexHandle(did, new Date().toISOString());
+			const insertRecords = indexingSvc.db.transaction(async (txn) => {
+				const indexingTx = indexingSvc.transact(txn)
+				for (const { uri: _uri, cid, indexedAt, record } of commits) {
+					const uri = new AtUri(_uri);
+					const indexer = indexingTx.findIndexerForCollection(uri.collection)
+					if (indexer) return indexer.insertRecord(uri, CID.parse(cid), record, indexedAt)
+				}
+			})
+			
+			try {
+				await Promise.allSettled([insertHandle, insertRecords])
+				await redis.sAdd("backfill:seen", did)
+				console.timeEnd(`Writing records: ${ commits.length } for ${ did }`);
+			} catch (err) {
+				console.error(`Error when writing ${ did }`, err)
+			}
+		} catch (err) {
+			console.warn(`iterateAtpRepo error for did ${did} --- ${err}`);
+		} finally {
+			shm.destroy(did);
+		}
 	});
-	getRepoQueue.process(500, (job, done) => {
-		const { did, pds } = job.data;
-		console.log(`Fetching repo for ${did}`);
-		getRepo(did, pds).then((repoBytes) => {
-			if (!repoBytes?.length) return done(null);
-			workerPool.queueTask({ did, repoBytes }, (err, result) => {
-				if (err) return console.error(`Error when processing ${did}`, err);
-				console.log(`Writing ${result.length} records for ${did}`);
-				return Promise.all(
-					result.map(({ uri, cid, indexedAt, record }) =>
-						indexingSvc.indexRecord(
-							new AtUri(uri),
-							CID.parse(cid),
-							record,
-							WriteOpAction.Create,
-							indexedAt,
-						)
-					),
-				).then(() => redis.sAdd("backfill:seen", did)).catch((err) =>
-					console.error(`Error when writing ${did}`, err)
-				).finally(() => done(null));
-			});
-		});
+
+	queue.on("error", (err) => {
+		console.error("Queue error:", err);
 	});
 
-	console.log("Reading DIDs");
-	const repos = await readOrFetchDids();
-	console.log(`Filtering out seen DIDs from ${repos.length} total`);
-	const notSeen = await redis.smIsMember("backfill:seen", repos.map((repo) => repo[0])).then((
-		seen,
-	) => repos.filter((_, i) => !seen[i]));
-	console.log(`Queuing ${notSeen.length} repos for processing`);
-	for (const dids of batch(notSeen, 1000)) {
-		console.log(`Queuing ${dids.length} repos`);
-		const errors = await getRepoQueue.saveAll(
-			dids.map(([did, pds]) => getRepoQueue.createJob({ did, pds })),
-		);
-		for (const [job, err] of errors) {
-			console.error(`Failed to queue repo ${job.data.did}`, err);
+	queue.on("failed", (job, err) => {
+		console.error(`Job failed for ${job.data.did}:`, err);
+	});
+}
+
+class WrappedRPC extends XRPC {
+	constructor(public service: string) {
+		super({ handler: simpleFetchHandler({ service }) });
+	}
+
+	override async request(options: XRPCRequestOptions, attempt = 0): Promise<XRPCResponse> {
+		const url = new URL("/xrpc/" + options.nsid, this.service).href;
+
+		const request = async () => {
+			const res = await super.request(options);
+			await processRatelimitHeaders(res.headers, url, sleep);
+			return res;
+		};
+
+		try {
+			return await request();
+		} catch (err) {
+			if (attempt > 6) throw err;
+
+			if (err instanceof XRPCError) {
+				if (err.status === 429) {
+					await processRatelimitHeaders(err.headers, url, sleep);
+				} else throw err;
+			} else if (err instanceof TypeError) {
+				console.warn(`fetch failed for ${url}, skipping`);
+				throw err;
+			} else {
+				await sleep(backoffs[attempt] || 60000);
+			}
+			console.warn(`Retrying request to ${url}, on attempt ${attempt}`);
+			return this.request(options, attempt + 1);
 		}
 	}
 }
 
-void main();
+async function getRepo(pds: string, did: string) {
+	const rpc = new WrappedRPC(pds);
+	const { data } = await rpc.get("com.atproto.sync.getRepo", { params: { did: did as `did:${string}` } });
+	return data;
+}
 
-const readOrFetchDids = async (): Promise<Array<[string, string]>> => {
+async function readOrFetchDids(): Promise<Array<[string, string]>> {
 	try {
 		return JSON.parse(fs.readFileSync("dids.json", "utf-8"));
 	} catch (err: any) {
@@ -118,16 +283,34 @@ const readOrFetchDids = async (): Promise<Array<[string, string]>> => {
 		writeDids(dids);
 		return dids;
 	}
-};
+}
 
-const writeDids = (dids: Array<[string, string]>) => {
+function writeDids(dids: Array<[string, string]>) {
 	fs.writeFileSync("dids.json", JSON.stringify(dids));
-};
+}
 
-const batch = <T>(array: Array<T>, size: number): Array<Array<T>> => {
-	const result = [];
-	for (let i = 0; i < array.length; i += size) {
-		result.push(array.slice(i, i + size));
+const backoffs = [1_000, 5_000, 15_000, 30_000, 60_000, 120_000, 300_000];
+
+async function processRatelimitHeaders(
+	headers: HeadersObject,
+	url: string,
+	onRatelimit: (wait: number) => unknown,
+) {
+	const remainingHeader = headers["ratelimit-remaining"],
+		resetHeader = headers["ratelimit-reset"];
+	if (!remainingHeader || !resetHeader) return;
+
+	const ratelimitRemaining = parseInt(remainingHeader);
+	if (isNaN(ratelimitRemaining) || ratelimitRemaining <= 1) {
+		const ratelimitReset = parseInt(resetHeader) * 1000;
+		if (isNaN(ratelimitReset)) {
+			console.error("ratelimit-reset header is not a number at url " + url);
+		} else {
+			const now = Date.now();
+			const waitTime = ratelimitReset - now + 1000; // add 1s to be safe
+			if (waitTime > 0) {
+				await onRatelimit(waitTime);
+			}
+		}
 	}
-	return result;
-};
+}
