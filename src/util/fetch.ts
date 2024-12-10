@@ -1,6 +1,5 @@
 import LargeMap from "large-map";
-import Errors from "undici/types/errors";
-import UndiciError = Errors.UndiciError;
+import { errors } from "undici";
 
 export async function fetchPdses(): Promise<Array<string>> {
 	const data = await fetch(
@@ -52,9 +51,9 @@ async function fetchPdsDids(pds: string, map: LargeMap<string, string>) {
 			if (!_c || _c === cursor) break;
 			cursor = _c;
 		} catch (err: any) {
-			const undiciError = err instanceof UndiciError
+			const undiciError = err instanceof errors.UndiciError
 				? err
-				: (err instanceof Error && err.cause instanceof UndiciError)
+				: (err instanceof Error && err.cause instanceof errors.UndiciError)
 				? err.cause
 				: null;
 			if (
