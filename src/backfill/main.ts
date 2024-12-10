@@ -110,7 +110,7 @@ if (cluster.isPrimary) {
 				console.timeEnd(`Fetching repo: ${did}`);
 			}
 		},
-		200,
+		180,
 	);
 
 	async function main() {
@@ -123,7 +123,10 @@ if (cluster.isPrimary) {
 
 		console.log(`Queuing ${notSeen.length} repos for processing`);
 		for (const [did, pds] of notSeen) {
-			await repoFetchQueue.push({ did, pds });
+			while (repoFetchQueue.length() >= repoFetchQueue.concurrency - 10) {
+				await sleep(200);
+			}
+			repoFetchQueue.push({ did, pds });
 		}
 
 		await new Promise<void>((resolve) => {
