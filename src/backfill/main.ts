@@ -123,23 +123,12 @@ if (cluster.isPrimary) {
 
 		console.log(`Queuing ${notSeen.length} repos for processing`);
 		for (const [did, pds] of notSeen) {
-			while (repoFetchQueue.length() >= repoFetchQueue.concurrency - 10) {
-				await sleep(200);
-			}
-			repoFetchQueue.push({ did, pds });
+			void repoFetchQueue.push({ did, pds }).catch((e) =>
+				console.error(`Error queuing repo for ${did} `, e)
+			);
 		}
 
-		await new Promise<void>((resolve) => {
-			const checkQueue = async () => {
-				const jobCounts = await queue.checkHealth();
-				if (jobCounts.waiting === 0 && jobCounts.active === 0) {
-					resolve();
-				} else {
-					setTimeout(checkQueue, 1000);
-				}
-			};
-			checkQueue();
-		});
+		await repoFetchQueue.drained();
 	}
 
 	void main();
