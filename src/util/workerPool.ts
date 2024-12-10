@@ -105,7 +105,7 @@ function extractTransferables(
 		const value = obj[key];
 		if (value instanceof ArrayBuffer) {
 			transferables.push(value);
-		} else if (ArrayBuffer.isView(value)) {
+		} else if (ArrayBuffer.isView(value) && value.buffer instanceof ArrayBuffer) {
 			transferables.push(value.buffer);
 		} else if (value && typeof value === "object" && Object.hasOwn(obj, key)) {
 			extractTransferables(value, transferables);
