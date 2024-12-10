@@ -13,8 +13,8 @@ import { IdResolver, MemoryCache } from "@atproto/identity";
 import { AtUri } from "@atproto/syntax";
 import { createClient } from "@redis/client";
 import Queue from "bee-queue";
-import fastq from "fastq";
 import CacheableLookup from "cacheable-lookup";
+import fastq from "fastq";
 import { CID } from "multiformats/cid";
 import cluster from "node:cluster";
 import fs from "node:fs";
@@ -22,7 +22,6 @@ import * as os from "node:os";
 import * as shm from "shm-typed-array";
 import { Agent, setGlobalDispatcher } from "undici";
 import { fetchAllDids, sleep } from "../util/fetch.js";
-import type { CommitData } from "./main.js";
 
 declare global {
 	namespace NodeJS {
@@ -36,12 +35,12 @@ declare global {
 
 for (
 	const envVar of [
-	"BSKY_DB_POSTGRES_URL",
-	"BSKY_DB_POSTGRES_SCHEMA",
-	"BSKY_REPO_PROVIDER",
-	"BSKY_DID_PLC_URL",
-]
-	) {
+		"BSKY_DB_POSTGRES_URL",
+		"BSKY_DB_POSTGRES_SCHEMA",
+		"BSKY_REPO_PROVIDER",
+		"BSKY_DID_PLC_URL",
+	]
+) {
 	if (!process.env[envVar]) throw new Error(`Missing env var ${envVar}`);
 }
 
@@ -65,6 +64,8 @@ setGlobalDispatcher(
 	}),
 );
 
+type CommitData = { uri: string; cid: string; indexedAt: string; record: unknown };
+
 const queue = new Queue<{ did: string }>("repo-processing", {
 	removeOnSuccess: true,
 	removeOnFailure: true,
@@ -84,27 +85,33 @@ if (cluster.isPrimary) {
 		console.error(`${worker.process.pid} died with code ${code} and signal ${signal}`);
 		cluster.fork();
 	});
-	
-	const repoFetchQueue = fastq.promise<null, { did: string; pds: string }>(async function ({ did, pds }) {
-		console.time(`Fetching repo: ${did}`);
-		try {
-		const repo = await getRepo(pds, did);
-		if (repo) {
-			const shared = shm.create(repo.length, "Uint8Array", did);
-			if (shared) shared.set(repo);
-			await queue.createJob({ did }).setId(did).save();
-		}
-		} catch (err) {
-			console.error(`Error fetching repo for ${did} --- ${err}`);
-			if (err instanceof XRPCError) {
-				if (err.name === "RepoDeactivated" || err.name === "RepoTakendown" || err.name === "RepoNotFound") {
-					await redis.sAdd("backfill:seen", did);
+
+	const repoFetchQueue = fastq.promise<null, { did: string; pds: string }>(
+		async function({ did, pds }) {
+			console.time(`Fetching repo: ${did}`);
+			try {
+				const repo = await getRepo(pds, did);
+				if (repo) {
+					const shared = shm.create(repo.length, "Uint8Array", did);
+					if (shared) shared.set(repo);
+					await queue.createJob({ did }).setId(did).save();
 				}
+			} catch (err) {
+				console.error(`Error fetching repo for ${did} --- ${err}`);
+				if (err instanceof XRPCError) {
+					if (
+						err.name === "RepoDeactivated" || err.name === "RepoTakendown"
+						|| err.name === "RepoNotFound"
+					) {
+						await redis.sAdd("backfill:seen", did);
+					}
+				}
+			} finally {
+				console.timeEnd(`Fetching repo: ${did}`);
 			}
-		} finally {
-			console.timeEnd(`Fetching repo: ${ did }`);
-		}
-	}, 200);
+		},
+		200,
+	);
 
 	async function main() {
 		console.log("Reading DIDs");
@@ -113,7 +120,7 @@ if (cluster.isPrimary) {
 		const notSeen = await redis.smIsMember("backfill:seen", repos.map((repo) => repo[0])).then((
 			seen,
 		) => repos.filter((_, i) => !seen[i]));
-		
+
 		console.log(`Queuing ${notSeen.length} repos for processing`);
 		for (const [did, pds] of notSeen) {
 			await repoFetchQueue.push({ did, pds });
@@ -122,9 +129,7 @@ if (cluster.isPrimary) {
 		await new Promise<void>((resolve) => {
 			const checkQueue = async () => {
 				const jobCounts = await queue.checkHealth();
-				if (
-					jobCounts.waiting === 0 && jobCounts.active === 0
-				) {
+				if (jobCounts.waiting === 0 && jobCounts.active === 0) {
 					resolve();
 				} else {
 					setTimeout(checkQueue, 1000);
@@ -141,18 +146,18 @@ if (cluster.isPrimary) {
 		schema: process.env.BSKY_DB_POSTGRES_SCHEMA,
 		poolSize: 5,
 	});
-	
+
 	const idResolver = new IdResolver({
 		plcUrl: process.env.BSKY_DID_PLC_URL,
 		didCache: new MemoryCache(),
 	});
-	
+
 	const { indexingSvc } = new bsky.RepoSubscription({
 		service: process.env.BSKY_REPO_PROVIDER,
 		db,
 		idResolver,
 	});
-	
+
 	queue.process(5, async (job) => {
 		const { did } = job.data;
 
@@ -166,7 +171,6 @@ if (cluster.isPrimary) {
 			console.warn(`Did not get repo for ${did}`);
 			return;
 		}
-
 
 		try {
 			console.time(`Processing repo: ${did}`);
@@ -199,24 +203,26 @@ if (cluster.isPrimary) {
 				});
 			}
 			console.timeEnd(`Processing repo: ${did}`);
-			
+
 			console.time(`Writing records: ${commits.length} for ${did}`);
 			const insertHandle = indexingSvc.indexHandle(did, new Date().toISOString());
 			const insertRecords = indexingSvc.db.transaction(async (txn) => {
-				const indexingTx = indexingSvc.transact(txn)
+				const indexingTx = indexingSvc.transact(txn);
 				for (const { uri: _uri, cid, indexedAt, record } of commits) {
 					const uri = new AtUri(_uri);
-					const indexer = indexingTx.findIndexerForCollection(uri.collection)
-					if (indexer) return indexer.insertRecord(uri, CID.parse(cid), record, indexedAt)
+					const indexer = indexingTx.findIndexerForCollection(uri.collection);
+					if (indexer) {
+						return indexer.insertRecord(uri, CID.parse(cid), record, indexedAt);
+					}
 				}
-			})
-			
+			});
+
 			try {
-				await Promise.allSettled([insertHandle, insertRecords])
-				await redis.sAdd("backfill:seen", did)
-				console.timeEnd(`Writing records: ${ commits.length } for ${ did }`);
+				await Promise.allSettled([insertHandle, insertRecords]);
+				await redis.sAdd("backfill:seen", did);
+				console.timeEnd(`Writing records: ${commits.length} for ${did}`);
 			} catch (err) {
-				console.error(`Error when writing ${ did }`, err)
+				console.error(`Error when writing ${did}`, err);
 			}
 		} catch (err) {
 			console.warn(`iterateAtpRepo error for did ${did} --- ${err}`);
@@ -271,7 +277,9 @@ class WrappedRPC extends XRPC {
 
 async function getRepo(pds: string, did: string) {
 	const rpc = new WrappedRPC(pds);
-	const { data } = await rpc.get("com.atproto.sync.getRepo", { params: { did: did as `did:${string}` } });
+	const { data } = await rpc.get("com.atproto.sync.getRepo", {
+		params: { did: did as `did:${string}` },
+	});
 	return data;
 }
 
