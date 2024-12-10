@@ -14,7 +14,6 @@ import { AtUri } from "@atproto/syntax";
 import { createClient } from "@redis/client";
 import Queue from "bee-queue";
 import CacheableLookup from "cacheable-lookup";
-import fastq from "fastq";
 import { CID } from "multiformats/cid";
 import cluster from "node:cluster";
 import fs from "node:fs";
@@ -22,6 +21,7 @@ import * as os from "node:os";
 import * as shm from "shm-typed-array";
 import { Agent, setGlobalDispatcher } from "undici";
 import { fetchAllDids, sleep } from "../util/fetch.js";
+import PQueue from 'p-queue'
 
 declare global {
 	namespace NodeJS {
@@ -86,32 +86,7 @@ if (cluster.isPrimary) {
 		cluster.fork();
 	});
 
-	const repoFetchQueue = fastq.promise<null, { did: string; pds: string }>(
-		async function({ did, pds }) {
-			console.time(`Fetching repo: ${did}`);
-			try {
-				const repo = await getRepo(pds, did);
-				if (repo) {
-					const shared = shm.create(repo.length, "Uint8Array", did);
-					if (shared) shared.set(repo);
-					await queue.createJob({ did }).setId(did).save();
-				}
-			} catch (err) {
-				console.error(`Error fetching repo for ${did} --- ${err}`);
-				if (err instanceof XRPCError) {
-					if (
-						err.name === "RepoDeactivated" || err.name === "RepoTakendown"
-						|| err.name === "RepoNotFound"
-					) {
-						await redis.sAdd("backfill:seen", did);
-					}
-				}
-			} finally {
-				console.timeEnd(`Fetching repo: ${did}`);
-			}
-		},
-		180,
-	);
+	const fetchQueue = new PQueue({ concurrency: 100 })
 
 	async function main() {
 		console.log("Reading DIDs");
@@ -123,12 +98,10 @@ if (cluster.isPrimary) {
 
 		console.log(`Queuing ${notSeen.length} repos for processing`);
 		for (const [did, pds] of notSeen) {
-			void repoFetchQueue.push({ did, pds }).catch((e) =>
-				console.error(`Error queuing repo for ${did} `, e)
-			);
+			await fetchQueue.onSizeLessThan(100);
+			void fetchQueue.add(() => queueRepo(pds, did))
+			.catch((e) => console.error(`Error queuing repo for ${did} `, e));
 		}
-
-		await repoFetchQueue.drained();
 	}
 
 	void main();
@@ -267,12 +240,31 @@ class WrappedRPC extends XRPC {
 	}
 }
 
-async function getRepo(pds: string, did: string) {
-	const rpc = new WrappedRPC(pds);
-	const { data } = await rpc.get("com.atproto.sync.getRepo", {
-		params: { did: did as `did:${string}` },
-	});
-	return data;
+async function queueRepo(pds: string, did: string) {
+	console.time(`Fetching repo: ${did}`);
+	try {
+		const rpc = new WrappedRPC(pds);
+		const { data: repo } = await rpc.get("com.atproto.sync.getRepo", {
+			params: { did: did as `did:${string}` },
+		});
+		if (repo?.length) {
+			const shared = shm.create(repo.length, "Uint8Array", did);
+			if (shared) shared.set(repo);
+			await queue.createJob({ did }).setId(did).save();
+		}
+	} catch (err) {
+		console.error(`Error fetching repo for ${did} --- ${err}`);
+		if (err instanceof XRPCError) {
+			if (
+				err.name === "RepoDeactivated" || err.name === "RepoTakendown"
+				|| err.name === "RepoNotFound"
+			) {
+				await redis.sAdd("backfill:seen", did);
+			}
+		}
+	} finally {
+		console.timeEnd(`Fetching repo: ${did}`);
+	}
 }
 
 async function readOrFetchDids(): Promise<Array<[string, string]>> {
