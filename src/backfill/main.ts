@@ -17,7 +17,10 @@ import PQueue from "p-queue";
 import * as shm from "shm-typed-array";
 import { Agent, RetryAgent, setGlobalDispatcher } from "undici";
 import { fetchAllDids, sleep } from "../util/fetch.js";
-import { repoWorker } from "./workers/repo.js";
+import { type CommitMessage, repoWorker } from "./workers/repo.js";
+import { writeWorker, writeWorkerAllocations } from "./workers/write.js";
+
+type WorkerMessage = CommitMessage;
 
 declare global {
 	namespace NodeJS {
@@ -83,21 +86,77 @@ const queue = new Queue<{ did: string }>("repo-processing", {
 	removeOnFailure: true,
 });
 
-const redis = createClient();
-await redis.connect();
-
 if (cluster.isPrimary) {
 	const numCPUs = os.availableParallelism();
 
-	for (let i = 0; i < numCPUs; i++) {
-		cluster.fork();
+	const redis = createClient();
+	await redis.connect();
+
+	const pidToWorkerInfo = new Map<number, { kind: "repo" } | { kind: "write"; index: number }>();
+	const collectionToWriteWorkerId = new Map<string, number>();
+
+	// Initialize write workers and track which collections they're responsible for
+	const spawnWriteWorker = (i: number) => {
+		const worker = cluster.fork({ WORKER_KIND: "write", WORKER_INDEX: `${i}` });
+		if (!worker.process?.pid) throw new Error("Worker process not found");
+		pidToWorkerInfo.set(worker.process.pid, { kind: "write", index: i });
+		for (const collection of writeWorkerAllocations[i]) {
+			collectionToWriteWorkerId.set(collection, worker.id);
+		}
+	};
+	for (let i = 0; i < 3; i++) {
+		spawnWriteWorker(i);
 	}
 
-	cluster.on("exit", (worker, code, signal) => {
-		console.error(`${worker.process.pid} died with code ${code} and signal ${signal}`);
-		cluster.fork();
+	// Initialize repo workers
+	const spawnRepoWorker = () => {
+		const worker = cluster.fork({ WORKER_KIND: "repo" });
+		if (!worker.process?.pid) throw new Error("Worker process not found");
+		pidToWorkerInfo.set(worker.process.pid, { kind: "repo" });
+	};
+	for (let i = 3; i < numCPUs; i++) {
+		spawnRepoWorker();
+	}
+
+	cluster.on("exit", ({ process: { pid } }, code, signal) => {
+		const workerInfo = pidToWorkerInfo.get(pid ?? -1);
+		if (!workerInfo || pid === undefined) {
+			console.error(`Unknown worker exited with code ${code} and signal ${signal}`);
+			// Should we restart a worker that should never exist?
+			// I don't think this is likely to ever be reached
+			cluster.fork();
+		} else {
+			pidToWorkerInfo.delete(pid);
+			if (workerInfo.kind === "write") {
+				spawnWriteWorker(workerInfo.index);
+			} else if (workerInfo.kind === "repo") {
+				spawnRepoWorker();
+			} else {
+				throw new Error(
+					`Unknown worker kind: ${
+						JSON.stringify(workerInfo)
+					} exited with code ${code} and signal ${signal}`,
+				);
+			}
+		}
 	});
 
+	cluster.on("message", (_, message: WorkerMessage) => {
+		if (message?.type !== "commit" || !message.collection || !message.data) {
+			throw new Error(`Received invalid worker message: ${JSON.stringify(message)}`);
+		}
+
+		const writeWorkerId = collectionToWriteWorkerId.get(message.collection);
+		// Repos can contain non-Bluesky records, just ignore them
+		if (writeWorkerId === undefined) return;
+		const writeWorker = cluster.workers?.[writeWorkerId];
+		if (!writeWorker) {
+			throw new Error(`Could not find write worker for collection ${message.collection}`);
+		}
+		writeWorker.send(message);
+	});
+
+	// Aim to be fetching ~100 repos at a time
 	const fetchQueue = new PQueue({ concurrency: 100 });
 
 	async function main() {
@@ -109,7 +168,9 @@ if (cluster.isPrimary) {
 
 		console.log(`Queuing ${repos.length} repos for processing`);
 		for (const [did, pds] of repos) {
+			// This may be faster as a single set difference?
 			if (seenDids.has(did)) continue;
+			// Wait for queue to be below 100 before adding another job
 			await fetchQueue.onSizeLessThan(100);
 			void fetchQueue.add(() => queueRepo(pds, did)).catch((e) =>
 				console.error(`Error queuing repo for ${did} `, e)
@@ -118,109 +179,115 @@ if (cluster.isPrimary) {
 	}
 
 	void main();
-} else {
-	void repoWorker();
-}
 
-class WrappedRPC extends XRPC {
-	constructor(public service: string) {
-		super({ handler: simpleFetchHandler({ service }) });
+	class WrappedRPC extends XRPC {
+		constructor(public service: string) {
+			super({ handler: simpleFetchHandler({ service }) });
+		}
+
+		override async request(options: XRPCRequestOptions, attempt = 0): Promise<XRPCResponse> {
+			const url = new URL("/xrpc/" + options.nsid, this.service).href;
+
+			const request = async () => {
+				const res = await super.request(options);
+				await processRatelimitHeaders(res.headers, url, sleep);
+				return res;
+			};
+
+			try {
+				return await request();
+			} catch (err) {
+				if (attempt > 6) throw err;
+
+				if (err instanceof XRPCError) {
+					if (err.status === 429) {
+						await processRatelimitHeaders(err.headers, url, sleep);
+					} else throw err;
+				} else if (err instanceof TypeError) {
+					console.warn(`fetch failed for ${url}, skipping`);
+					throw err;
+				} else {
+					await sleep(backoffs[attempt] || 60000);
+				}
+				console.warn(`Retrying request to ${url}, on attempt ${attempt}`);
+				return this.request(options, attempt + 1);
+			}
+		}
 	}
 
-	override async request(options: XRPCRequestOptions, attempt = 0): Promise<XRPCResponse> {
-		const url = new URL("/xrpc/" + options.nsid, this.service).href;
-
-		const request = async () => {
-			const res = await super.request(options);
-			await processRatelimitHeaders(res.headers, url, sleep);
-			return res;
-		};
-
+	async function queueRepo(pds: string, did: string) {
+		console.time(`Fetching repo: ${did}`);
 		try {
-			return await request();
+			const rpc = new WrappedRPC(pds);
+			const { data: repo } = await rpc.get("com.atproto.sync.getRepo", {
+				params: { did: did as `did:${string}` },
+			});
+			if (repo?.length) {
+				const shared = shm.create(repo.length, "Uint8Array", did);
+				if (shared) shared.set(repo);
+				await queue.createJob({ did }).setId(did).save();
+			}
 		} catch (err) {
-			if (attempt > 6) throw err;
-
+			console.error(`Error fetching repo for ${did} --- ${err}`);
 			if (err instanceof XRPCError) {
-				if (err.status === 429) {
-					await processRatelimitHeaders(err.headers, url, sleep);
-				} else throw err;
-			} else if (err instanceof TypeError) {
-				console.warn(`fetch failed for ${url}, skipping`);
-				throw err;
+				if (
+					err.name === "RepoDeactivated" || err.name === "RepoTakendown"
+					|| err.name === "RepoNotFound"
+				) {
+					await redis.sAdd("backfill:seen", did);
+				}
+			}
+		} finally {
+			console.timeEnd(`Fetching repo: ${did}`);
+		}
+	}
+
+	async function readOrFetchDids(): Promise<Array<[string, string]>> {
+		try {
+			return unpack(fs.readFileSync("dids.cache"));
+		} catch (err: any) {
+			const dids = await fetchAllDids();
+			writeDids(dids);
+			return dids;
+		}
+	}
+
+	function writeDids(dids: Array<[string, string]>) {
+		fs.writeFileSync("dids.cache", pack(dids));
+	}
+
+	const backoffs = [1_000, 5_000, 15_000, 30_000, 60_000, 120_000, 300_000];
+
+	async function processRatelimitHeaders(
+		headers: HeadersObject,
+		url: string,
+		onRatelimit: (wait: number) => unknown,
+	) {
+		const remainingHeader = headers["ratelimit-remaining"],
+			resetHeader = headers["ratelimit-reset"];
+		if (!remainingHeader || !resetHeader) return;
+
+		const ratelimitRemaining = parseInt(remainingHeader);
+		if (isNaN(ratelimitRemaining) || ratelimitRemaining <= 1) {
+			const ratelimitReset = parseInt(resetHeader) * 1000;
+			if (isNaN(ratelimitReset)) {
+				console.error("ratelimit-reset header is not a number at url " + url);
 			} else {
-				await sleep(backoffs[attempt] || 60000);
-			}
-			console.warn(`Retrying request to ${url}, on attempt ${attempt}`);
-			return this.request(options, attempt + 1);
-		}
-	}
-}
-
-async function queueRepo(pds: string, did: string) {
-	console.time(`Fetching repo: ${did}`);
-	try {
-		const rpc = new WrappedRPC(pds);
-		const { data: repo } = await rpc.get("com.atproto.sync.getRepo", {
-			params: { did: did as `did:${string}` },
-		});
-		if (repo?.length) {
-			const shared = shm.create(repo.length, "Uint8Array", did);
-			if (shared) shared.set(repo);
-			await queue.createJob({ did }).setId(did).save();
-		}
-	} catch (err) {
-		console.error(`Error fetching repo for ${did} --- ${err}`);
-		if (err instanceof XRPCError) {
-			if (
-				err.name === "RepoDeactivated" || err.name === "RepoTakendown"
-				|| err.name === "RepoNotFound"
-			) {
-				await redis.sAdd("backfill:seen", did);
+				const now = Date.now();
+				const waitTime = ratelimitReset - now + 1000; // add 1s to be safe
+				if (waitTime > 0) {
+					console.log("Rate limited at " + url + ", waiting " + waitTime + "ms");
+					await onRatelimit(waitTime);
+				}
 			}
 		}
-	} finally {
-		console.timeEnd(`Fetching repo: ${did}`);
 	}
-}
-
-async function readOrFetchDids(): Promise<Array<[string, string]>> {
-	try {
-		return unpack(fs.readFileSync("dids.cache"));
-	} catch (err: any) {
-		const dids = await fetchAllDids();
-		writeDids(dids);
-		return dids;
-	}
-}
-
-function writeDids(dids: Array<[string, string]>) {
-	fs.writeFileSync("dids.cache", pack(dids));
-}
-
-const backoffs = [1_000, 5_000, 15_000, 30_000, 60_000, 120_000, 300_000];
-
-async function processRatelimitHeaders(
-	headers: HeadersObject,
-	url: string,
-	onRatelimit: (wait: number) => unknown,
-) {
-	const remainingHeader = headers["ratelimit-remaining"],
-		resetHeader = headers["ratelimit-reset"];
-	if (!remainingHeader || !resetHeader) return;
-
-	const ratelimitRemaining = parseInt(remainingHeader);
-	if (isNaN(ratelimitRemaining) || ratelimitRemaining <= 1) {
-		const ratelimitReset = parseInt(resetHeader) * 1000;
-		if (isNaN(ratelimitReset)) {
-			console.error("ratelimit-reset header is not a number at url " + url);
-		} else {
-			const now = Date.now();
-			const waitTime = ratelimitReset - now + 1000; // add 1s to be safe
-			if (waitTime > 0) {
-				console.log("Rate limited at " + url + ", waiting " + waitTime + "ms");
-				await onRatelimit(waitTime);
-			}
-		}
+} else {
+	if (process.env.WORKER_KIND === "repo") {
+		void repoWorker();
+	} else if (process.env.WORKER_KIND === "write") {
+		void writeWorker();
+	} else {
+		throw new Error(`Unknown worker kind: ${process.env.WORKER_KIND}`);
 	}
 }
