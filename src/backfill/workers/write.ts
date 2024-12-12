@@ -1,7 +1,6 @@
 import { IdResolver, MemoryCache } from "@atproto/identity";
 import { AtUri } from "@atproto/syntax";
 import * as bsky from "@futuristick/atproto-bsky";
-import type RecordProcessor from "@futuristick/atproto-bsky/dist/data-plane/server/indexing/processor";
 import { CID } from "multiformats/cid";
 import type { CommitMessage } from "./repo.js";
 
@@ -51,14 +50,13 @@ export async function writeWorker() {
 		idResolver,
 	});
 
-	const indexers: Record<string, RecordProcessor<unknown, unknown>> = {};
 	const queues: Record<string, Set<{ uri: AtUri; cid: CID; timestamp: string; obj: unknown }>> =
 		{};
 
 	for (const collection of collections) {
-		const indexer = indexingSvc.findIndexerForCollection(collection);
-		if (!indexer) throw new Error(`No indexer for collection ${collection}`);
-		indexers[collection] = indexer;
+		if (!indexingSvc.findIndexerForCollection(collection)) {
+			throw new Error(`No indexer for collection ${collection}`);
+		}
 		queues[collection] = new Set();
 	}
 
@@ -70,29 +68,27 @@ export async function writeWorker() {
 			throw new Error(`Invalid commit data ${JSON.stringify(msg.data)}`);
 		}
 
-		if (!indexers[msg.collection]) {
-			throw new Error(`No indexer for collection ${msg.collection}`);
-		}
-
+		if (!queues[msg.collection]) return;
 		queues[msg.collection].add({ uri: new AtUri(uri), cid: CID.parse(cid), timestamp, obj });
 	});
 
 	setTimeout(async function processQueues() {
-		await Promise.allSettled(collections.map(async (collection) => {
-			const indexer = indexers[collection];
-			if (!indexer) throw new Error(`No indexer for collection ${collection}`);
+		await Promise.all(collections.map(async (collection) => {
+			try {
+				const queue = queues[collection];
+				if (!queue) throw new Error(`No queue for collection ${collection}`);
 
-			const queue = queues[collection];
-			if (!queue) throw new Error(`No queue for collection ${collection}`);
+				const records = Array.from(queue);
+				queue.clear();
 
-			const records = Array.from(queue);
-			queue.clear();
+				if (!records.length) return;
 
-			if (!records.length) return;
-
-			console.time(`Writing records: ${records.length} for ${collection}`);
-			await indexer.insertBulkRecords(records, { disableNotifs: true });
-			console.timeEnd(`Writing records: ${records.length} for ${collection}`);
+				console.time(`Writing records: ${records.length} for ${collection}`);
+				await indexingSvc.indexRecordsBulk(collection, records);
+				console.timeEnd(`Writing records: ${records.length} for ${collection}`);
+			} catch (err) {
+				console.error(`Error processing queue for ${collection}`, err);
+			}
 		}));
 		setTimeout(processQueues, 1000);
 	}, 1000);
