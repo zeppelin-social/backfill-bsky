@@ -1,7 +1,7 @@
-import * as bsky from "@atproto/bsky";
 import { IdResolver, MemoryCache } from "@atproto/identity";
 import { WriteOpAction } from "@atproto/repo";
 import type { Event } from "@atproto/sync";
+import * as bsky from "@futuristick/atproto-bsky";
 import fs from "node:fs";
 import readline from "node:readline/promises";
 import { deserializeEvent } from "./serialize.js";

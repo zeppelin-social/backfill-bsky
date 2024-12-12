@@ -1,5 +1,5 @@
-import * as bsky from "@atproto/bsky";
 import { IdResolver, MemoryCache } from "@atproto/identity";
+import * as bsky from "@futuristick/atproto-bsky";
 
 declare global {
 	namespace NodeJS {
