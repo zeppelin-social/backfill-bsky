@@ -1,8 +1,8 @@
 import { iterateAtpRepo } from "@atcute/car";
 import { parse as parseTID } from "@atcute/tid";
-import * as bsky from "@atproto/bsky";
 import { IdResolver, MemoryCache } from "@atproto/identity";
 import { AtUri } from "@atproto/syntax";
+import * as bsky from "@futuristick/atproto-bsky";
 import { createClient } from "@redis/client";
 import Queue from "bee-queue";
 import { CID } from "multiformats/cid";

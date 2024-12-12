@@ -17,9 +17,6 @@ importers:
       '@atcute/tid':
         specifier: ^1.0.1
         version: 1.0.1
-      '@atproto/bsky':
-        specifier: ^0.0.96
-        version: 0.0.96
       '@atproto/identity':
         specifier: ^0.4.3
         version: 0.4.3
@@ -32,6 +29,9 @@ importers:
       '@atproto/syntax':
         specifier: ^0.3.1
         version: 0.3.1
+      '@futuristick/atproto-bsky':
+        specifier: insert-batching
+        version: 0.0.98-insert-batching
       '@redis/client':
         specifier: ^1.6.0
         version: 1.6.0
@@ -105,12 +105,8 @@ packages:
   '@atcute/varint@1.0.1':
     resolution: {integrity: sha512-GXWu+CIfpQGSMSOSUskjwU/licxH8WcyX4t11mRKafQIE4Yi3v5GuchMYVOu89YX15tY93QzY/0zMQDCWoke8Q==}
 
-  '@atproto/api@0.13.19':
-    resolution: {integrity: sha512-rLWQBZaOIk3ds1Fx9CwrdyX3X2GbdSEvVJ9mdSPNX40joiEaE1ljGMOcziFipbvZacXynozE4E0Sb1CgOhzfmA==}
-
-  '@atproto/bsky@0.0.96':
-    resolution: {integrity: sha512-Tk0ppiPMKdcnPU3x+uBAVRn92vroznhr2OlqinNSy/PZ39qWViRlKAhG3CLJsU2gjSHxsNfaIwulj7tPvKCmSw==}
-    hasBin: true
+  '@atproto/api@0.13.20':
+    resolution: {integrity: sha512-z/+CvG6BEttRHf856tKSe1AeUQNfrobRJldaHAthGmFk7O3wLZQyfcI9DUmBJQ9+4wAt0dZwvKWVGLZOV9eLHA==}
 
   '@atproto/common-web@0.3.1':
     resolution: {integrity: sha512-N7wiTnus5vAr+lT//0y8m/FaHHLJ9LpGuEwkwDAeV3LCiPif4m/FS8x/QOYrx1PdZQwKso95RAPzCGWQBH5j6Q==}
@@ -120,6 +116,9 @@ packages:
 
   '@atproto/common@0.4.4':
     resolution: {integrity: sha512-58tMbn6A1Zu296s/l3uIj8z9d7IRHpZvLOfsFRikaQaYrzhJpL2aPY4uFQ8GJcxnsxeUnxBCrQz9we5jVVJI5Q==}
+
+  '@atproto/common@0.4.5':
+    resolution: {integrity: sha512-LFAGqHcxCI5+b31Xgk+VQQtZU258iGPpHJzNeHVcdh6teIKZi4C2l6YV+m+3CEz+yYcfP7jjUmgqesx7l9Arsg==}
 
   '@atproto/crypto@0.1.0':
     resolution: {integrity: sha512-9xgFEPtsCiJEPt9o3HtJT30IdFTGw5cQRSJVIy5CFhqBA4vDLcdXiRDLCjkzHEVbtNCsHUW6CrlfOgbeLPcmcg==}
@@ -133,11 +132,20 @@ packages:
   '@atproto/lexicon@0.4.3':
     resolution: {integrity: sha512-lFVZXe1S1pJP0dcxvJuHP3r/a+EAIBwwU7jUK+r8iLhIja+ml6NmYv8KeFHmIJATh03spEQ9s02duDmFVdCoXg==}
 
+  '@atproto/lexicon@0.4.4':
+    resolution: {integrity: sha512-QFEmr3rpj/RoAmfX9ALU/asBG/rsVtQZnw+9nOB1/AuIwoxXd+ZyndR6lVUc2+DL4GEjl6W2yvBru5xbQIZWyA==}
+
   '@atproto/repo@0.5.5':
     resolution: {integrity: sha512-Zu1tw42KBVyFzIh1XYSIvm8V+V9oEKWJR7NnHBgeSMwCc9QwM32jO7uqgvEjZYEXgdYKanGhv/YHLyxtZa5Ckg==}
 
+  '@atproto/repo@0.6.0':
+    resolution: {integrity: sha512-6YGVhjiHKmqCW5Ce4oY49E3NCEfbvAGowJ5ETXX2sx2l4D2bOL7a2hn5zWqsPHYpWSLjrPfnj7PVpApK0kmL7A==}
+
   '@atproto/sync@0.1.6':
     resolution: {integrity: sha512-9lqe6E6fIns28TJyQufLCVefMxmK3bvEfQBhmXJBGZMHuKlH8+F5P9DfnHv6vs6ygfmHIUIjYDWqJu/rpt8pzw==}
+
+  '@atproto/sync@0.1.7':
+    resolution: {integrity: sha512-liJH2EsD4AbWA8G0oRDURgbHW6Uq4NnM2rNfbrTlqgtj0kyGRY3FcVEyqeRcaQYfCuscChIg5DQKHqY421/7Mw==}
 
   '@atproto/syntax@0.3.1':
     resolution: {integrity: sha512-fzW0Mg1QUOVCWUD3RgEsDt6d1OZ6DdFmbKcDdbzUfh0t4rhtRAC05KbZYmxuMPWDAiJ4BbbQ5dkAc/mNypMXkw==}
@@ -145,8 +153,14 @@ packages:
   '@atproto/xrpc-server@0.7.3':
     resolution: {integrity: sha512-x0qegkN6snrbXJO3v9h2kuh9e90g6ZZkDXv3COiraGS3yRTzIm6i4bMvDSfCI50+0xCNtPKOkpn8taRoRgkyiw==}
 
+  '@atproto/xrpc-server@0.7.4':
+    resolution: {integrity: sha512-MrAwxfJBQm/kCol3D8qc+vpQzBMzLqvtUbauSSfVVJ10PlGtxg4LlXqcjkAuhrjyrqp3dQH9LHuhDpgVQK+G3w==}
+
   '@atproto/xrpc@0.6.4':
     resolution: {integrity: sha512-9ZAJ8nsXTqC4XFyS0E1Wlg7bAvonhXQNQ3Ocs1L1LIwFLXvsw/4fNpIHXxvXvqTCVeyHLbImOnE9UiO1c/qIYA==}
+
+  '@atproto/xrpc@0.6.5':
+    resolution: {integrity: sha512-t6u8iPEVbWge5RhzKZDahSzNDYIAxUtop6Q/X/apAZY1rgreVU0/1sSvvRoRFH19d3UIKjYdLuwFqMi9w8nY3Q==}
 
   '@babel/runtime@7.26.0':
     resolution: {integrity: sha512-FDSOghenHTiToteC/QRlv2q3DhPZ/oOXTBoirfWNx1Cx3TMVcGWQtMMmQcSvb/JjpNeGzx8Pq/b4fKEJuWm1sw==}
@@ -403,6 +417,10 @@ packages:
   '@fastify/busboy@2.1.1':
     resolution: {integrity: sha512-vBZP4NlzfOlerQTnba4aqZoMhE/a9HY7HRqoOPaETQcSQuWEIyZMHGfVu6w9wGtGK5fED5qRs2DteVCjOH60sA==}
     engines: {node: '>=14'}
+
+  '@futuristick/atproto-bsky@0.0.98-insert-batching':
+    resolution: {integrity: sha512-utkq3fxaAmi+58/h/Vp67iZZ0l5nXETWob9mPmkLX9SYrnrS3SvzYXayb8HKLVNQjTlvJVTCy93FVx3nCorxiQ==}
+    hasBin: true
 
   '@img/sharp-darwin-arm64@0.33.5':
     resolution: {integrity: sha512-UT4p+iz/2H4twwAoLCqfA9UH5pI6DggwKEGuaPy7nCVQ8ZsiY5PIcrRvD1DzuY3qYL07NtIQcWnBSY/heikIFQ==}
@@ -1717,60 +1735,16 @@ snapshots:
 
   '@atcute/varint@1.0.1': {}
 
-  '@atproto/api@0.13.19':
+  '@atproto/api@0.13.20':
     dependencies:
       '@atproto/common-web': 0.3.1
-      '@atproto/lexicon': 0.4.3
+      '@atproto/lexicon': 0.4.4
       '@atproto/syntax': 0.3.1
-      '@atproto/xrpc': 0.6.4
+      '@atproto/xrpc': 0.6.5
       await-lock: 2.2.2
       multiformats: 9.9.0
       tlds: 1.255.0
       zod: 3.23.8
-
-  '@atproto/bsky@0.0.96':
-    dependencies:
-      '@atproto/api': 0.13.19
-      '@atproto/common': 0.4.4
-      '@atproto/crypto': 0.4.2
-      '@atproto/identity': 0.4.3
-      '@atproto/lexicon': 0.4.3
-      '@atproto/repo': 0.5.5
-      '@atproto/sync': 0.1.6
-      '@atproto/syntax': 0.3.1
-      '@atproto/xrpc-server': 0.7.3
-      '@bufbuild/protobuf': 1.10.0
-      '@connectrpc/connect': 1.6.1(@bufbuild/protobuf@1.10.0)
-      '@connectrpc/connect-express': 1.6.1(@bufbuild/protobuf@1.10.0)(@connectrpc/connect-node@1.6.1(@bufbuild/protobuf@1.10.0)(@connectrpc/connect@1.6.1(@bufbuild/protobuf@1.10.0)))(@connectrpc/connect@1.6.1(@bufbuild/protobuf@1.10.0))
-      '@connectrpc/connect-node': 1.6.1(@bufbuild/protobuf@1.10.0)(@connectrpc/connect@1.6.1(@bufbuild/protobuf@1.10.0))
-      '@did-plc/lib': 0.0.1
-      compression: 1.7.5
-      cors: 2.8.5
-      express: 4.21.2
-      http-errors: 2.0.0
-      http-terminator: 3.2.0
-      ioredis: 5.4.1
-      jose: 5.9.6
-      key-encoder: 2.0.3
-      kysely: 0.22.0
-      multiformats: 9.9.0
-      murmurhash: 2.0.1
-      p-queue: 6.6.2
-      pg: 8.13.1
-      pino: 8.21.0
-      pino-http: 8.6.1
-      sharp: 0.33.5
-      statsig-node: 5.30.0
-      structured-headers: 1.0.1
-      typed-emitter: 2.1.0
-      uint8arrays: 3.0.0
-    transitivePeerDependencies:
-      - bufferutil
-      - debug
-      - encoding
-      - pg-native
-      - supports-color
-      - utf-8-validate
 
   '@atproto/common-web@0.3.1':
     dependencies:
@@ -1787,6 +1761,15 @@ snapshots:
       zod: 3.23.8
 
   '@atproto/common@0.4.4':
+    dependencies:
+      '@atproto/common-web': 0.3.1
+      '@ipld/dag-cbor': 7.0.3
+      cbor-x: 1.6.0
+      iso-datestring-validator: 2.2.2
+      multiformats: 9.9.0
+      pino: 8.21.0
+
+  '@atproto/common@0.4.5':
     dependencies:
       '@atproto/common-web': 0.3.1
       '@ipld/dag-cbor': 7.0.3
@@ -1825,12 +1808,32 @@ snapshots:
       multiformats: 9.9.0
       zod: 3.23.8
 
+  '@atproto/lexicon@0.4.4':
+    dependencies:
+      '@atproto/common-web': 0.3.1
+      '@atproto/syntax': 0.3.1
+      iso-datestring-validator: 2.2.2
+      multiformats: 9.9.0
+      zod: 3.23.8
+
   '@atproto/repo@0.5.5':
     dependencies:
       '@atproto/common': 0.4.4
       '@atproto/common-web': 0.3.1
       '@atproto/crypto': 0.4.2
       '@atproto/lexicon': 0.4.3
+      '@ipld/car': 3.2.4
+      '@ipld/dag-cbor': 7.0.3
+      multiformats: 9.9.0
+      uint8arrays: 3.0.0
+      zod: 3.23.8
+
+  '@atproto/repo@0.6.0':
+    dependencies:
+      '@atproto/common': 0.4.5
+      '@atproto/common-web': 0.3.1
+      '@atproto/crypto': 0.4.2
+      '@atproto/lexicon': 0.4.4
       '@ipld/car': 3.2.4
       '@ipld/dag-cbor': 7.0.3
       multiformats: 9.9.0
@@ -1847,6 +1850,23 @@ snapshots:
       '@atproto/xrpc-server': 0.7.3
       multiformats: 9.9.0
       p-queue: 6.6.2
+    transitivePeerDependencies:
+      - bufferutil
+      - debug
+      - supports-color
+      - utf-8-validate
+
+  '@atproto/sync@0.1.7':
+    dependencies:
+      '@atproto/common': 0.4.5
+      '@atproto/identity': 0.4.3
+      '@atproto/lexicon': 0.4.4
+      '@atproto/repo': 0.6.0
+      '@atproto/syntax': 0.3.1
+      '@atproto/xrpc-server': 0.7.4
+      multiformats: 9.9.0
+      p-queue: 6.6.2
+      ws: 8.18.0
     transitivePeerDependencies:
       - bufferutil
       - debug
@@ -1874,9 +1894,33 @@ snapshots:
       - supports-color
       - utf-8-validate
 
+  '@atproto/xrpc-server@0.7.4':
+    dependencies:
+      '@atproto/common': 0.4.5
+      '@atproto/crypto': 0.4.2
+      '@atproto/lexicon': 0.4.4
+      '@atproto/xrpc': 0.6.5
+      cbor-x: 1.6.0
+      express: 4.21.2
+      http-errors: 2.0.0
+      mime-types: 2.1.35
+      rate-limiter-flexible: 2.4.2
+      uint8arrays: 3.0.0
+      ws: 8.18.0
+      zod: 3.23.8
+    transitivePeerDependencies:
+      - bufferutil
+      - supports-color
+      - utf-8-validate
+
   '@atproto/xrpc@0.6.4':
     dependencies:
       '@atproto/lexicon': 0.4.3
+      zod: 3.23.8
+
+  '@atproto/xrpc@0.6.5':
+    dependencies:
+      '@atproto/lexicon': 0.4.4
       zod: 3.23.8
 
   '@babel/runtime@7.26.0':
@@ -2036,6 +2080,50 @@ snapshots:
     optional: true
 
   '@fastify/busboy@2.1.1': {}
+
+  '@futuristick/atproto-bsky@0.0.98-insert-batching':
+    dependencies:
+      '@atproto/api': 0.13.20
+      '@atproto/common': 0.4.5
+      '@atproto/crypto': 0.4.2
+      '@atproto/identity': 0.4.3
+      '@atproto/lexicon': 0.4.4
+      '@atproto/repo': 0.6.0
+      '@atproto/sync': 0.1.7
+      '@atproto/syntax': 0.3.1
+      '@atproto/xrpc-server': 0.7.4
+      '@bufbuild/protobuf': 1.10.0
+      '@connectrpc/connect': 1.6.1(@bufbuild/protobuf@1.10.0)
+      '@connectrpc/connect-express': 1.6.1(@bufbuild/protobuf@1.10.0)(@connectrpc/connect-node@1.6.1(@bufbuild/protobuf@1.10.0)(@connectrpc/connect@1.6.1(@bufbuild/protobuf@1.10.0)))(@connectrpc/connect@1.6.1(@bufbuild/protobuf@1.10.0))
+      '@connectrpc/connect-node': 1.6.1(@bufbuild/protobuf@1.10.0)(@connectrpc/connect@1.6.1(@bufbuild/protobuf@1.10.0))
+      '@did-plc/lib': 0.0.1
+      compression: 1.7.5
+      cors: 2.8.5
+      express: 4.21.2
+      http-errors: 2.0.0
+      http-terminator: 3.2.0
+      ioredis: 5.4.1
+      jose: 5.9.6
+      key-encoder: 2.0.3
+      kysely: 0.22.0
+      multiformats: 9.9.0
+      murmurhash: 2.0.1
+      p-queue: 6.6.2
+      pg: 8.13.1
+      pino: 8.21.0
+      pino-http: 8.6.1
+      sharp: 0.33.5
+      statsig-node: 5.30.0
+      structured-headers: 1.0.1
+      typed-emitter: 2.1.0
+      uint8arrays: 3.0.0
+    transitivePeerDependencies:
+      - bufferutil
+      - debug
+      - encoding
+      - pg-native
+      - supports-color
+      - utf-8-validate
 
   '@img/sharp-darwin-arm64@0.33.5':
     optionalDependencies:
