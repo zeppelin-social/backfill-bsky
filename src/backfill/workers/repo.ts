@@ -58,10 +58,6 @@ export async function repoWorker() {
 				}
 				if (indexedAt > now) indexedAt = now;
 
-				// The appview IndexingService does lex validation on the record, which only accepts blob refs in the
-				// form of a BlobRef instance, so we need to do this expensive iteration over every single record
-				convertBlobRefs(record);
-
 				const data = {
 					uri,
 					cid: cid.$link,
@@ -87,45 +83,3 @@ export async function repoWorker() {
 		console.error(`Job failed for ${job.data.did}:`, err);
 	});
 }
-
-function convertBlobRefs(obj: unknown): unknown {
-	if (Array.isArray(obj)) {
-		obj.forEach((item) => convertBlobRefs(item));
-		return obj;
-	} else {
-		assertObject(obj);
-
-		// weird-ish formulation but faster than for-in or Object.entries
-		const keys = Object.keys(obj);
-		let i = keys.length;
-		while (i--) {
-			const key = keys[i];
-			const value = obj[key];
-			if (typeof value === "object" && value !== null) {
-				if (value.$type === "blob") {
-					try {
-						const cidLink = CID.parse(value.ref.$link);
-						obj[key] = new BlobRef(cidLink, value.mimeType, value.size);
-					} catch {
-						console.warn(
-							`Failed to parse CID ${value.ref.$link}\nRecord: ${
-								JSON.stringify(obj)
-							}`,
-						);
-						return obj;
-					}
-				} else {
-					convertBlobRefs(value);
-				}
-			}
-		}
-	}
-
-	return obj;
-}
-
-const assertObject: (obj: unknown) => asserts obj is Record<string, any> = (obj) => {
-	if (typeof obj !== "object" || obj === null) {
-		throw new Error("Expected object");
-	}
-};

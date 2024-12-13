@@ -1,4 +1,5 @@
 import { IdResolver, MemoryCache } from "@atproto/identity";
+import { BlobRef } from "@atproto/lexicon";
 import { AtUri } from "@atproto/syntax";
 import * as bsky from "@futuristick/atproto-bsky";
 import { CID } from "multiformats/cid";
@@ -68,6 +69,10 @@ export async function writeWorker() {
 			throw new Error(`Invalid commit data ${JSON.stringify(msg.data)}`);
 		}
 
+		// The appview IndexingService does lex validation on the record, which only accepts blob refs in the
+		// form of a BlobRef instance, so we need to do this expensive iteration over every single record
+		convertBlobRefs(obj);
+
 		if (!queues[msg.collection]) return;
 		queues[msg.collection].add({ uri: new AtUri(uri), cid: CID.parse(cid), timestamp, obj });
 	});
@@ -92,4 +97,42 @@ export async function writeWorker() {
 		}));
 		setTimeout(processQueues, 1000);
 	}, 1000);
+}
+
+function convertBlobRefs(obj: unknown): unknown {
+	if (!obj) return obj;
+	if (Array.isArray(obj)) {
+		for (let i = 0; i < obj.length; i++) {
+			obj[i] = convertBlobRefs(obj[i]);
+		}
+	} else if (typeof obj === "object") {
+		const record = obj as Record<string, any>;
+
+		// weird-ish formulation but faster than for-in or Object.entries
+		const keys = Object.keys(record);
+		let i = keys.length;
+		while (i--) {
+			const key = keys[i];
+			const value = record[key];
+			if (typeof value === "object" && value !== null) {
+				if (value.$type === "blob") {
+					try {
+						const cidLink = CID.parse(value.ref.$link);
+						record[key] = new BlobRef(cidLink, value.mimeType, value.size);
+					} catch {
+						console.warn(
+							`Failed to parse CID ${value.ref.$link}\nRecord: ${
+								JSON.stringify(record)
+							}`,
+						);
+						return record;
+					}
+				} else {
+					convertBlobRefs(value);
+				}
+			}
+		}
+	}
+
+	return obj;
 }
