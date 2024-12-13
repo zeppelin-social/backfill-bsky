@@ -68,12 +68,12 @@ export async function writeWorker() {
 		if (!uri || !cid || !timestamp || !obj) {
 			throw new Error(`Invalid commit data ${JSON.stringify(msg.data)}`);
 		}
+		if (!queues[msg.collection]) return;
 
 		// The appview IndexingService does lex validation on the record, which only accepts blob refs in the
 		// form of a BlobRef instance, so we need to do this expensive iteration over every single record
 		convertBlobRefs(obj);
 
-		if (!queues[msg.collection]) return;
 		queues[msg.collection].add({ uri: new AtUri(uri), cid: CID.parse(cid), timestamp, obj });
 	});
 
