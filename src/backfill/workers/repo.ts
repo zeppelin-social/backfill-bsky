@@ -89,27 +89,34 @@ export async function repoWorker() {
 }
 
 function convertBlobRefs(obj: unknown): unknown {
-	assertObject(obj);
+	if (Array.isArray(obj)) {
+		obj.forEach((item) => convertBlobRefs(item));
+		return obj;
+	} else {
+		assertObject(obj);
 
-	// weird-ish formulation but faster than for-in or Object.entries
-	const keys = Object.keys(obj);
-	let i = keys.length;
-	while (i--) {
-		const key = keys[i];
-		const value = obj[key];
-		if (typeof value === "object" && value !== null) {
-			if (value.$type === "blob") {
-				try {
-					const cidLink = CID.parse(value.ref.$link);
-					obj[key] = new BlobRef(cidLink, value.mimeType, value.size);
-				} catch {
-					console.warn(
-						`Failed to parse CID ${value.ref.$link}\nRecord: ${JSON.stringify(obj)}`,
-					);
-					return obj;
+		// weird-ish formulation but faster than for-in or Object.entries
+		const keys = Object.keys(obj);
+		let i = keys.length;
+		while (i--) {
+			const key = keys[i];
+			const value = obj[key];
+			if (typeof value === "object" && value !== null) {
+				if (value.$type === "blob") {
+					try {
+						const cidLink = CID.parse(value.ref.$link);
+						obj[key] = new BlobRef(cidLink, value.mimeType, value.size);
+					} catch {
+						console.warn(
+							`Failed to parse CID ${value.ref.$link}\nRecord: ${
+								JSON.stringify(obj)
+							}`,
+						);
+						return obj;
+					}
+				} else {
+					convertBlobRefs(value);
 				}
-			} else {
-				convertBlobRefs(value);
 			}
 		}
 	}
