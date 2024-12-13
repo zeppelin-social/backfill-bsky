@@ -1,7 +1,9 @@
 import { iterateAtpRepo } from "@atcute/car";
 import { parse as parseTID } from "@atcute/tid";
+import { BlobRef } from "@atproto/lexicon";
 import { createClient } from "@redis/client";
 import Queue from "bee-queue";
+import { CID } from "multiformats/cid";
 import * as shm from "shm-typed-array";
 
 export type CommitData = { uri: string; cid: string; timestamp: string; obj: unknown };
@@ -56,6 +58,10 @@ export async function repoWorker() {
 				}
 				if (indexedAt > now) indexedAt = now;
 
+				// The appview IndexingService does lex validation on the record, which only accepts blob refs in the
+				// form of a BlobRef instance, so we need to do this expensive iteration over every single record
+				convertBlobRefs(record);
+
 				const data = {
 					uri,
 					cid: cid.$link,
@@ -81,3 +87,38 @@ export async function repoWorker() {
 		console.error(`Job failed for ${job.data.did}:`, err);
 	});
 }
+
+function convertBlobRefs(obj: unknown): unknown {
+	assertObject(obj);
+
+	// weird-ish formulation but faster than for-in or Object.entries
+	const keys = Object.keys(obj);
+	let i = keys.length;
+	while (i--) {
+		const key = keys[i];
+		const value = obj[key];
+		if (typeof value === "object" && value !== null) {
+			if (value.$type === "blob") {
+				try {
+					const cidLink = CID.parse(value.ref.$link);
+					obj[key] = new BlobRef(cidLink, value.mimeType, value.size);
+				} catch {
+					console.warn(
+						`Failed to parse CID ${value.ref.$link}\nRecord: ${JSON.stringify(obj)}`,
+					);
+					return obj;
+				}
+			} else {
+				convertBlobRefs(value);
+			}
+		}
+	}
+
+	return obj;
+}
+
+const assertObject: (obj: unknown) => asserts obj is Record<string, any> = (obj) => {
+	if (typeof obj !== "object" || obj === null) {
+		throw new Error("Expected object");
+	}
+};

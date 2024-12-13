@@ -20,6 +20,9 @@ importers:
       '@atproto/identity':
         specifier: ^0.4.3
         version: 0.4.3
+      '@atproto/lexicon':
+        specifier: ^0.4.4
+        version: 0.4.4
       '@atproto/repo':
         specifier: ^0.5.5
         version: 0.5.5
@@ -31,7 +34,7 @@ importers:
         version: 0.3.1
       '@futuristick/atproto-bsky':
         specifier: insert-batching
-        version: 0.0.98-insert-batching.3
+        version: 0.0.98-insert-batching.4
       '@redis/client':
         specifier: ^1.6.0
         version: 1.6.0
@@ -128,9 +131,6 @@ packages:
 
   '@atproto/identity@0.4.3':
     resolution: {integrity: sha512-DLXMWh57dHvIeBl+IvC+q20z0IdDZT1awOn84vDyxacL9DfhbiTy/zCUPFEzHyvfrilNG1tDA4zQzURubdFqNg==}
-
-  '@atproto/lexicon@0.4.3':
-    resolution: {integrity: sha512-lFVZXe1S1pJP0dcxvJuHP3r/a+EAIBwwU7jUK+r8iLhIja+ml6NmYv8KeFHmIJATh03spEQ9s02duDmFVdCoXg==}
 
   '@atproto/lexicon@0.4.4':
     resolution: {integrity: sha512-QFEmr3rpj/RoAmfX9ALU/asBG/rsVtQZnw+9nOB1/AuIwoxXd+ZyndR6lVUc2+DL4GEjl6W2yvBru5xbQIZWyA==}
@@ -418,8 +418,8 @@ packages:
     resolution: {integrity: sha512-vBZP4NlzfOlerQTnba4aqZoMhE/a9HY7HRqoOPaETQcSQuWEIyZMHGfVu6w9wGtGK5fED5qRs2DteVCjOH60sA==}
     engines: {node: '>=14'}
 
-  '@futuristick/atproto-bsky@0.0.98-insert-batching.3':
-    resolution: {integrity: sha512-9T2WzFbqnxq5MFqmo3MOVOHD/zb1BRq/5KN5AIDfQkoG5CKjXyYzWqqEICgyru5RdvA5XmjMP1BKPV/qNSLf2Q==}
+  '@futuristick/atproto-bsky@0.0.98-insert-batching.4':
+    resolution: {integrity: sha512-MCR8sWydBAaeEVLy7Ek4d7+/q5JkDLVeQ0stglbpo3okUCLIGYGDtx9oDnByqTTMyhuEK4h8CznFStWfCm/9kA==}
     hasBin: true
 
   '@img/sharp-darwin-arm64@0.33.5':
@@ -1800,14 +1800,6 @@ snapshots:
     transitivePeerDependencies:
       - debug
 
-  '@atproto/lexicon@0.4.3':
-    dependencies:
-      '@atproto/common-web': 0.3.1
-      '@atproto/syntax': 0.3.1
-      iso-datestring-validator: 2.2.2
-      multiformats: 9.9.0
-      zod: 3.23.8
-
   '@atproto/lexicon@0.4.4':
     dependencies:
       '@atproto/common-web': 0.3.1
@@ -1821,7 +1813,7 @@ snapshots:
       '@atproto/common': 0.4.4
       '@atproto/common-web': 0.3.1
       '@atproto/crypto': 0.4.2
-      '@atproto/lexicon': 0.4.3
+      '@atproto/lexicon': 0.4.4
       '@ipld/car': 3.2.4
       '@ipld/dag-cbor': 7.0.3
       multiformats: 9.9.0
@@ -1844,7 +1836,7 @@ snapshots:
     dependencies:
       '@atproto/common': 0.4.4
       '@atproto/identity': 0.4.3
-      '@atproto/lexicon': 0.4.3
+      '@atproto/lexicon': 0.4.4
       '@atproto/repo': 0.5.5
       '@atproto/syntax': 0.3.1
       '@atproto/xrpc-server': 0.7.3
@@ -1879,7 +1871,7 @@ snapshots:
     dependencies:
       '@atproto/common': 0.4.4
       '@atproto/crypto': 0.4.2
-      '@atproto/lexicon': 0.4.3
+      '@atproto/lexicon': 0.4.4
       '@atproto/xrpc': 0.6.4
       cbor-x: 1.6.0
       express: 4.21.2
@@ -1915,7 +1907,7 @@ snapshots:
 
   '@atproto/xrpc@0.6.4':
     dependencies:
-      '@atproto/lexicon': 0.4.3
+      '@atproto/lexicon': 0.4.4
       zod: 3.23.8
 
   '@atproto/xrpc@0.6.5':
@@ -2081,7 +2073,7 @@ snapshots:
 
   '@fastify/busboy@2.1.1': {}
 
-  '@futuristick/atproto-bsky@0.0.98-insert-batching.3':
+  '@futuristick/atproto-bsky@0.0.98-insert-batching.4':
     dependencies:
       '@atproto/api': 0.13.20
       '@atproto/common': 0.4.5
