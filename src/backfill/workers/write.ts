@@ -27,6 +27,14 @@ export const writeWorkerAllocations = [[
 	"app.bsky.graph.listblock",
 ]];
 
+// Too many inserts at once will result in exceeding Postgres' parameter limit, so we insert in batches
+const collectionBatchSizeLimits: Record<string, number> = {
+	"app.bsky.feed.repost": 800,
+	"app.bsky.graph.follow": 1000,
+	"app.bsky.feed.post": 1000,
+	"app.bsky.feed.like": 2000,
+};
+
 export async function writeWorker() {
 	const workerIndex = parseInt(process.env.WORKER_INDEX || "-1");
 	const collections = writeWorkerAllocations[workerIndex];
@@ -89,7 +97,14 @@ export async function writeWorker() {
 				if (!records.length) return;
 
 				console.time(`Writing records: ${records.length} for ${collection}`);
-				await indexingSvc.indexRecordsBulk(collection, records);
+				for (
+					const batch of batchArray(
+						records,
+						collectionBatchSizeLimits[collection] || 1000,
+					)
+				) {
+					await indexingSvc.indexRecordsBulk(collection, batch);
+				}
 				console.timeEnd(`Writing records: ${records.length} for ${collection}`);
 			} catch (err) {
 				console.error(`Error processing queue for ${collection}`, err);
@@ -135,4 +150,12 @@ function convertBlobRefs(obj: unknown): unknown {
 	}
 
 	return obj;
+}
+
+function batchArray<T>(arr: T[], batchSize: number): T[][] {
+	const batches: T[][] = [];
+	for (let i = 0; i < arr.length; i += batchSize) {
+		batches.push(arr.slice(i, i + batchSize));
+	}
+	return batches;
 }
