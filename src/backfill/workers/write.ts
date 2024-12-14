@@ -45,7 +45,7 @@ export async function writeWorker() {
 	const db = new bsky.Database({
 		url: process.env.BSKY_DB_POSTGRES_URL,
 		schema: process.env.BSKY_DB_POSTGRES_SCHEMA,
-		poolSize: 1,
+		poolSize: 5,
 	});
 
 	const idResolver = new IdResolver({
@@ -85,8 +85,8 @@ export async function writeWorker() {
 		queues[msg.collection].add({ uri: new AtUri(uri), cid: CID.parse(cid), timestamp, obj });
 	});
 
-	setTimeout(async function processQueues() {
-		await Promise.all(collections.map(async (collection) => {
+	for (const collection of collections) {
+		setTimeout(async function processQueue() {
 			try {
 				const queue = queues[collection];
 				if (!queue) throw new Error(`No queue for collection ${collection}`);
@@ -108,10 +108,11 @@ export async function writeWorker() {
 				console.timeEnd(`Writing records: ${records.length} for ${collection}`);
 			} catch (err) {
 				console.error(`Error processing queue for ${collection}`, err);
+			} finally {
+				setTimeout(processQueue, 1000);
 			}
-		}));
-		setTimeout(processQueues, 1000);
-	}, 1000);
+		}, 1000);
+	}
 }
 
 function convertBlobRefs(obj: unknown): unknown {
