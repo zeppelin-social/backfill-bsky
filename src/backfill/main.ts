@@ -168,6 +168,8 @@ if (cluster.isPrimary) {
 
 		console.log(`Queuing ${repos.length} repos for processing`);
 		for (const [did, pds] of repos) {
+			// dumb pds doesn't implement getRepo
+			if (pds.includes("blueski.social")) continue;
 			// This may be faster as a single set difference?
 			if (seenDids.has(did)) continue;
 			// Wait for queue to be below 100 before adding another job
