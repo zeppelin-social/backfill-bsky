@@ -33,8 +33,8 @@ importers:
         specifier: ^0.3.1
         version: 0.3.1
       '@futuristick/atproto-bsky':
-        specifier: insert-batching
-        version: 0.0.98-insert-batching.8
+        specifier: 0.0.98-insert-batching.9
+        version: 0.0.98-insert-batching.9
       '@redis/client':
         specifier: ^1.6.0
         version: 1.6.0
@@ -418,8 +418,8 @@ packages:
     resolution: {integrity: sha512-vBZP4NlzfOlerQTnba4aqZoMhE/a9HY7HRqoOPaETQcSQuWEIyZMHGfVu6w9wGtGK5fED5qRs2DteVCjOH60sA==}
     engines: {node: '>=14'}
 
-  '@futuristick/atproto-bsky@0.0.98-insert-batching.8':
-    resolution: {integrity: sha512-9ggx3q6rM+8YDXf5bdl4i9C4EIyBiP76BDmqyCgXggufcZMgZWCnxMSRu8q1KsrzIdGis4Xi8hBuBnJAt9LyBQ==}
+  '@futuristick/atproto-bsky@0.0.98-insert-batching.9':
+    resolution: {integrity: sha512-awC8O3MyM1U7bWtMcO4QcUgO+NFATwQrOysyBcQm6nd4XxpHGmKsaigqYFgvOySYf1S9+9Wqve0G6ZpigQBVHw==}
     hasBin: true
 
   '@img/sharp-darwin-arm64@0.33.5':
@@ -2073,7 +2073,7 @@ snapshots:
 
   '@fastify/busboy@2.1.1': {}
 
-  '@futuristick/atproto-bsky@0.0.98-insert-batching.8':
+  '@futuristick/atproto-bsky@0.0.98-insert-batching.9':
     dependencies:
       '@atproto/api': 0.13.20
       '@atproto/common': 0.4.5
