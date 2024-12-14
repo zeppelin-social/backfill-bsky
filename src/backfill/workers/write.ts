@@ -28,10 +28,11 @@ export const writeWorkerAllocations = [[
 ]];
 
 // Too many inserts at once will result in exceeding Postgres' parameter limit, so we insert in batches
+// Default to 1664, the max length of a VALUES clause in Postgres
 const collectionBatchSizeLimits: Record<string, number> = {
-	"app.bsky.feed.repost": 800,
-	"app.bsky.graph.follow": 1000,
-	"app.bsky.feed.post": 1000,
+	"app.bsky.feed.repost": 1000,
+	"app.bsky.graph.follow": 1664,
+	"app.bsky.feed.post": 1664,
 	"app.bsky.feed.like": 2000,
 };
 
@@ -100,7 +101,7 @@ export async function writeWorker() {
 				for (
 					const batch of batchArray(
 						records,
-						collectionBatchSizeLimits[collection] || 1000,
+						collectionBatchSizeLimits[collection] || 1664,
 					)
 				) {
 					await indexingSvc.indexRecordsBulk(collection, batch);
