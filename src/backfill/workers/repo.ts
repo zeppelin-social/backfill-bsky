@@ -1,9 +1,7 @@
 import { iterateAtpRepo } from "@atcute/car";
 import { parse as parseTID } from "@atcute/tid";
-import { BlobRef } from "@atproto/lexicon";
 import { createClient } from "@redis/client";
 import Queue from "bee-queue";
-import { CID } from "multiformats/cid";
 import * as shm from "shm-typed-array";
 
 export type CommitData = { uri: string; cid: string; timestamp: string; obj: unknown };

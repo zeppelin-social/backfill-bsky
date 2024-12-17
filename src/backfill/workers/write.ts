@@ -5,6 +5,8 @@ import * as bsky from "@futuristick/atproto-bsky";
 import { CID } from "multiformats/cid";
 import type { CommitMessage } from "./repo.js";
 
+type ToInsertCommit = { uri: AtUri; cid: CID; timestamp: string; obj: unknown };
+
 // 3 write workers, each handles 5 record types
 // picked largely based on vibes to kind of evenly distribute load
 export const writeWorkerAllocations = [[
@@ -51,8 +53,8 @@ export async function writeWorker() {
 		idResolver,
 	});
 
-	const queues: Record<string, Set<{ uri: AtUri; cid: CID; timestamp: string; obj: unknown }>> =
-		{};
+	const queues: Record<string, Set<ToInsertCommit>> = {};
+	{}
 
 	for (const collection of collections) {
 		if (!indexingSvc.findIndexerForCollection(collection)) {
@@ -77,29 +79,22 @@ export async function writeWorker() {
 		queues[msg.collection].add({ uri: new AtUri(uri), cid: CID.parse(cid), timestamp, obj });
 	});
 
-	for (const collection of collections) {
-		setTimeout(async function processQueue() {
-			try {
-				const queue = queues[collection];
-				if (!queue) throw new Error(`No queue for collection ${collection}`);
-
-				const records = Array.from(queue);
-				queue.clear();
-
-				if (!records.length) return;
-
-				console.time(`Writing records: ${records.length} for ${collection}`);
-				for (const batch of batchArray(records, 20000)) {
-					await indexingSvc.indexRecordsBulk(collection, batch);
-				}
-				console.timeEnd(`Writing records: ${records.length} for ${collection}`);
-			} catch (err) {
-				console.error(`Error processing queue for ${collection}`, err);
-			} finally {
-				setTimeout(processQueue, 1000);
+	setTimeout(async function processQueue() {
+		try {
+			const records = new Map<string, ToInsertCommit[]>();
+			for (const collection of collections) {
+				records.set(collection, Array.from(queues[collection]));
 			}
-		}, 1000);
-	}
+
+			console.time(`Writing records for ${collections.join(", ")}`);
+			await indexingSvc.indexRecordsBulkAcrossCollections(records);
+			console.timeEnd(`Writing records for ${collections.join(", ")}`);
+		} catch (err) {
+			console.error(`Error processing queue for ${collections[0]}`, err);
+		} finally {
+			setTimeout(processQueue, 1000);
+		}
+	}, 1000);
 }
 
 function convertBlobRefs(obj: unknown): unknown {
@@ -138,12 +133,4 @@ function convertBlobRefs(obj: unknown): unknown {
 	}
 
 	return obj;
-}
-
-function batchArray<T>(arr: T[], batchSize: number): T[][] {
-	const batches: T[][] = [];
-	for (let i = 0; i < arr.length; i += batchSize) {
-		batches.push(arr.slice(i, i + batchSize));
-	}
-	return batches;
 }
