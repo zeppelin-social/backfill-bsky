@@ -83,12 +83,16 @@ export async function writeWorker() {
 		try {
 			const records = new Map<string, ToInsertCommit[]>();
 			for (const collection of collections) {
-				records.set(collection, Array.from(queues[collection]));
+				if (queues[collection].size > 0) {
+					records.set(collection, Array.from(queues[collection]));
+				}
 			}
 
-			console.time(`Writing records for ${collections.join(", ")}`);
-			await indexingSvc.indexRecordsBulkAcrossCollections(records);
-			console.timeEnd(`Writing records for ${collections.join(", ")}`);
+			if (records.size > 0) {
+				console.time(`Writing records for ${collections.join(", ")}`);
+				await indexingSvc.indexRecordsBulkAcrossCollections(records);
+				console.timeEnd(`Writing records for ${collections.join(", ")}`);
+			}
 		} catch (err) {
 			console.error(`Error processing queue for ${collections[0]}`, err);
 		} finally {
