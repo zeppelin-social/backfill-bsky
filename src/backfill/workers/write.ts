@@ -85,17 +85,18 @@ export async function writeWorker() {
 			for (const collection of collections) {
 				if (queues[collection].size > 0) {
 					records.set(collection, Array.from(queues[collection]));
+					queues[collection].clear();
 				}
 			}
 
 			if (records.size > 0) {
 				console.time(`Writing records for ${collections.join(", ")}`);
 				await indexingSvc.indexRecordsBulkAcrossCollections(records);
-				console.timeEnd(`Writing records for ${collections.join(", ")}`);
 			}
 		} catch (err) {
-			console.error(`Error processing queue for ${collections[0]}`, err);
+			console.error(`Error processing queue for ${collections.join(", ")}`, err);
 		} finally {
+			console.timeEnd(`Writing records for ${collections.join(", ")}`);
 			setTimeout(processQueue, 1000);
 		}
 	}, 1000);
