@@ -33,8 +33,8 @@ importers:
         specifier: ^0.3.1
         version: 0.3.1
       '@futuristick/atproto-bsky':
-        specifier: 0.0.98-insert-batching.12
-        version: 0.0.98-insert-batching.12
+        specifier: 0.0.101-insert-batching.01
+        version: 0.0.101-insert-batching.1
       '@redis/client':
         specifier: ^1.6.0
         version: 1.6.0
@@ -108,8 +108,8 @@ packages:
   '@atcute/varint@1.0.1':
     resolution: {integrity: sha512-GXWu+CIfpQGSMSOSUskjwU/licxH8WcyX4t11mRKafQIE4Yi3v5GuchMYVOu89YX15tY93QzY/0zMQDCWoke8Q==}
 
-  '@atproto/api@0.13.20':
-    resolution: {integrity: sha512-z/+CvG6BEttRHf856tKSe1AeUQNfrobRJldaHAthGmFk7O3wLZQyfcI9DUmBJQ9+4wAt0dZwvKWVGLZOV9eLHA==}
+  '@atproto/api@0.13.23':
+    resolution: {integrity: sha512-V1Z5kgfSsqlFaC14sjnZL1Psv/9Lq/YKW1w7TIBq948Rtq8l+c6BpGrOH2Ssdcphpqi4OSeSYRsmJJlD6GGJ5w==}
 
   '@atproto/common-web@0.3.1':
     resolution: {integrity: sha512-N7wiTnus5vAr+lT//0y8m/FaHHLJ9LpGuEwkwDAeV3LCiPif4m/FS8x/QOYrx1PdZQwKso95RAPzCGWQBH5j6Q==}
@@ -418,8 +418,8 @@ packages:
     resolution: {integrity: sha512-vBZP4NlzfOlerQTnba4aqZoMhE/a9HY7HRqoOPaETQcSQuWEIyZMHGfVu6w9wGtGK5fED5qRs2DteVCjOH60sA==}
     engines: {node: '>=14'}
 
-  '@futuristick/atproto-bsky@0.0.98-insert-batching.12':
-    resolution: {integrity: sha512-UF3ERkLuuIRrp+qgP3WB7McmPs4Jf9j1hcVqecy0361N6+eitjGJhxFbaCkdfAExpF42pufFxb3TL3V+luMrYg==}
+  '@futuristick/atproto-bsky@0.0.101-insert-batching.1':
+    resolution: {integrity: sha512-Z+UxU/3j15olCtjinQqtA1ba/LPNcYTdCzuLJksPrKGOb3sAqB5wDUBuDK7tPSGh7QZSa6BZEz4BjU5j9uQbkg==}
     hasBin: true
 
   '@img/sharp-darwin-arm64@0.33.5':
@@ -1303,6 +1303,9 @@ packages:
   pg-connection-string@2.7.0:
     resolution: {integrity: sha512-PI2W9mv53rXJQEOb8xNR8lH7Hr+EKa6oJa38zsK0S/ky2er16ios1wLKhZyxzD7jUReiWokc9WK5nxSnC7W1TA==}
 
+  pg-copy-streams@6.0.6:
+    resolution: {integrity: sha512-Z+Dd2C2NIDTsjyFKmc6a9QLlpM8tjpERx+43RSx0WmL7j3uNChERi3xSvZUL0hWJ1oRUn4S3fhyt3apdSrTyKQ==}
+
   pg-int8@1.0.1:
     resolution: {integrity: sha512-WCtabS6t3c8SkpDBUlb1kjOs7l66xsGdKpIPZsg4wR+B3+u9UAum2odSsF9tnvxg80h4ZxLWMy4pRjOsFIqQpw==}
     engines: {node: '>=4.0.0'}
@@ -1735,7 +1738,7 @@ snapshots:
 
   '@atcute/varint@1.0.1': {}
 
-  '@atproto/api@0.13.20':
+  '@atproto/api@0.13.23':
     dependencies:
       '@atproto/common-web': 0.3.1
       '@atproto/lexicon': 0.4.4
@@ -2073,9 +2076,9 @@ snapshots:
 
   '@fastify/busboy@2.1.1': {}
 
-  '@futuristick/atproto-bsky@0.0.98-insert-batching.12':
+  '@futuristick/atproto-bsky@0.0.101-insert-batching.1':
     dependencies:
-      '@atproto/api': 0.13.20
+      '@atproto/api': 0.13.23
       '@atproto/common': 0.4.5
       '@atproto/crypto': 0.4.2
       '@atproto/identity': 0.4.3
@@ -2102,6 +2105,7 @@ snapshots:
       murmurhash: 2.0.1
       p-queue: 6.6.2
       pg: 8.13.1
+      pg-copy-streams: 6.0.6
       pino: 8.21.0
       pino-http: 8.6.1
       sharp: 0.33.5
@@ -3070,6 +3074,10 @@ snapshots:
     optional: true
 
   pg-connection-string@2.7.0: {}
+
+  pg-copy-streams@6.0.6:
+    dependencies:
+      obuf: 1.1.2
 
   pg-int8@1.0.1: {}
 
