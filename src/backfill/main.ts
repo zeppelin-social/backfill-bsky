@@ -93,7 +93,7 @@ if (cluster.isPrimary) {
 	const db = new bsky.Database({
 		url: process.env.BSKY_DB_POSTGRES_URL,
 		schema: process.env.BSKY_DB_POSTGRES_SCHEMA,
-		poolSize: 10,
+		poolSize: 50,
 	});
 
 	await Promise.all(
@@ -105,9 +105,11 @@ if (cluster.isPrimary) {
 	const indexes = await db.pool.query(`
 		SELECT pg_get_indexdef(i.indexrelid) AS createcmd,
 			   'DROP INDEX ' || i.indexrelid::regclass AS dropcmd
-		FROM   pg_index i
-		JOIN   pg_class cl ON cl.oid = i.indexrelid
-		WHERE  cl.relname LIKE '%_idx';
+		FROM pg_index i
+		JOIN pg_class cl ON cl.oid = i.indexrelid
+		LEFT JOIN pg_constraint co ON co.conindid = i.indexrelid
+		WHERE cl.relname LIKE '%_idx'
+		AND co.conindid IS NULL
 		`);
 
 	await Promise.all(indexes.rows.map(({ dropcmd }) => db.pool.query(dropcmd)));
@@ -181,19 +183,20 @@ if (cluster.isPrimary) {
 		writeWorker.send(message);
 	});
 
-	["exit", "SIGINT", "SIGTERM", "uncaughtException"].forEach((event) => {
-		process.on(event, async () => {
-			await Promise.all(
-				Object.keys(DB_SETTINGS).map((setting) =>
-					db.pool.query(`ALTER SYSTEM RESET ${setting}`)
-				),
-			);
+	process.on("beforeExit", async () => {
+		console.log("Resetting DB settings");
+		await Promise.all(
+			Object.keys(DB_SETTINGS).map((setting) =>
+				db.pool.query(`ALTER SYSTEM RESET ${setting}`)
+			),
+		);
 
-			await Promise.all(indexes.rows.map(({ createcmd }) => db.pool.query(createcmd)));
+		// console.log("Recreating indexes");
+		// await Promise.all(indexes.rows.map(({ createcmd }) => db.pool.query(createcmd)));
 
-			await db.pool.end();
-			await redis.disconnect();
-		});
+		console.log("Closing DB connections");
+		await db.pool.end();
+		await redis.disconnect();
 	});
 
 	// Aim to be fetching ~100 repos at a time
