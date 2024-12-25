@@ -6,6 +6,7 @@ import {
 	type XRPCRequestOptions,
 	type XRPCResponse,
 } from "@atcute/client";
+import * as bsky from "@futuristick/atproto-bsky";
 import { createClient } from "@redis/client";
 import Queue from "bee-queue";
 import CacheableLookup from "cacheable-lookup";
@@ -43,6 +44,8 @@ for (
 ) {
 	if (!process.env[envVar]) throw new Error(`Missing env var ${envVar}`);
 }
+
+const DB_SETTINGS = { archive_mode: "off", wal_level: "minimal", max_wal_senders: 0, fsync: "off" };
 
 const cacheable = new CacheableLookup();
 
@@ -87,7 +90,27 @@ const queue = new Queue<{ did: string }>("repo-processing", {
 });
 
 if (cluster.isPrimary) {
-	const numCPUs = os.availableParallelism();
+	const db = new bsky.Database({
+		url: process.env.BSKY_DB_POSTGRES_URL,
+		schema: process.env.BSKY_DB_POSTGRES_SCHEMA,
+		poolSize: 10,
+	});
+
+	await Promise.all(
+		Object.entries(DB_SETTINGS).map(([setting, value]) =>
+			db.pool.query(`ALTER SYSTEM SET ${setting} = ${value}`)
+		),
+	);
+
+	const indexes = await db.pool.query(`
+		SELECT pg_get_indexdef(i.indexrelid) AS createcmd,
+			   'DROP INDEX ' || i.indexrelid::regclass AS dropcmd
+		FROM   pg_index i
+		JOIN   pg_class cl ON cl.oid = i.indexrelid
+		WHERE  cl.relname LIKE '%_idx';
+		`);
+
+	await Promise.all(indexes.rows.map(({ dropcmd }) => db.pool.query(dropcmd)));
 
 	const redis = createClient();
 	await redis.connect();
@@ -114,6 +137,8 @@ if (cluster.isPrimary) {
 		if (!worker.process?.pid) throw new Error("Worker process not found");
 		pidToWorkerInfo.set(worker.process.pid, { kind: "repo" });
 	};
+
+	const numCPUs = os.availableParallelism();
 	for (let i = 3; i < numCPUs; i++) {
 		spawnRepoWorker();
 	}
@@ -154,6 +179,21 @@ if (cluster.isPrimary) {
 			throw new Error(`Could not find write worker for collection ${message.collection}`);
 		}
 		writeWorker.send(message);
+	});
+
+	["exit", "SIGINT", "SIGTERM", "uncaughtException"].forEach((event) => {
+		process.on(event, async () => {
+			await Promise.all(
+				Object.keys(DB_SETTINGS).map((setting) =>
+					db.pool.query(`ALTER SYSTEM RESET ${setting}`)
+				),
+			);
+
+			await Promise.all(indexes.rows.map(({ createcmd }) => db.pool.query(createcmd)));
+
+			await db.pool.end();
+			await redis.disconnect();
+		});
 	});
 
 	// Aim to be fetching ~100 repos at a time
