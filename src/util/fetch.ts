@@ -65,13 +65,20 @@ async function fetchPdsDids(pds: string, map: LargeMap<string, string>) {
 				].includes(undiciError?.code ?? "")
 			) {
 				console.warn(`Could not connect to ${url} for listRepos, skipping`);
+				break;
 			} else {
-				console.warn(
-					`listRepos failed for ${url} at cursor ${cursor}, skipping`,
-					err instanceof Error ? err.message : err,
-				);
+				// bsky.network PDS definitely exists
+				if (pds.includes("bsky.network")) {
+					console.warn(`listRepos failed for ${url} at cursor ${cursor}, retrying`);
+					await sleep(5000);
+				} else {
+					console.warn(
+						`listRepos failed for ${url} at cursor ${cursor}, skipping`,
+						err instanceof Error ? err.message : err,
+					);
+					break;
+				}
 			}
-			break;
 		}
 	}
 	console.log(`Fetched ${fetched} DIDs from ${pds}`);
