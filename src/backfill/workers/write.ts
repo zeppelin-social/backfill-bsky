@@ -92,11 +92,12 @@ export async function writeWorker() {
 			if (records.size > 0) {
 				console.time(`Writing records for ${collections.join(", ")}`);
 				await indexingSvc.indexRecordsBulkAcrossCollections(records);
+				console.timeEnd(`Writing records for ${collections.join(", ")}`);
 			}
 		} catch (err) {
 			console.error(`Error processing queue for ${collections.join(", ")}`, err);
-		} finally {
 			console.timeEnd(`Writing records for ${collections.join(", ")}`);
+		} finally {
 			setTimeout(processQueue, 1000);
 		}
 	}, 1000);
