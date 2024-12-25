@@ -79,6 +79,10 @@ export async function writeWorker() {
 		queues[msg.collection].add({ uri: new AtUri(uri), cid: CID.parse(cid), timestamp, obj });
 	});
 
+	process.on("uncaughtException", (err) => {
+		console.error(`Uncaught exception in worker ${workerIndex}`, err);
+	});
+
 	setTimeout(async function processQueue() {
 		try {
 			const records = new Map<string, ToInsertCommit[]>();

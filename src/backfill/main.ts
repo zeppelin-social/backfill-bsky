@@ -146,6 +146,7 @@ if (cluster.isPrimary) {
 	}
 
 	cluster.on("exit", ({ process: { pid } }, code, signal) => {
+		console.warn(`Worker ${pid} exited with code ${code} and signal ${signal}`);
 		const workerInfo = pidToWorkerInfo.get(pid ?? -1);
 		if (!workerInfo || pid === undefined) {
 			console.error(`Unknown worker exited with code ${code} and signal ${signal}`);
