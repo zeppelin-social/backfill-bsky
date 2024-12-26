@@ -141,7 +141,7 @@ if (cluster.isPrimary) {
 	};
 
 	const numCPUs = os.availableParallelism();
-	for (let i = 3; i < numCPUs; i++) {
+	for (let i = 3; i < numCPUs * 3; i++) {
 		spawnRepoWorker();
 	}
 

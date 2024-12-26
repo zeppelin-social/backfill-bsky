@@ -17,7 +17,7 @@ export async function repoWorker() {
 	const redis = createClient();
 	await redis.connect();
 
-	queue.process(5, async (job) => {
+	queue.process(30, async (job) => {
 		if (!process?.send) throw new Error("Not a worker process");
 
 		const { did } = job.data;
@@ -27,9 +27,12 @@ export async function repoWorker() {
 			return;
 		}
 
-		const repo = shm.get(did, "Uint8Array");
-		if (!repo?.byteLength) {
-			console.warn(`Did not get repo for ${did}`);
+		let repo;
+		try {
+			repo = shm.get(did, "Uint8Array");
+			if (!repo?.byteLength) throw new Error("Got ewmpty repo for " + did);
+		} catch (err) {
+			console.warn(err);
 			return;
 		}
 
@@ -75,9 +78,11 @@ export async function repoWorker() {
 
 	queue.on("error", (err) => {
 		console.error("Queue error:", err);
+		process.exit(1);
 	});
 
 	queue.on("failed", (job, err) => {
 		console.error(`Job failed for ${job.data.did}:`, err);
+		process.exit(1);
 	});
 }
