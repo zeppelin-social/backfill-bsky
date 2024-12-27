@@ -30,9 +30,9 @@ export async function repoWorker() {
 		let repo;
 		try {
 			repo = shm.get(did, "Uint8Array");
-			if (!repo?.byteLength) throw new Error("Got ewmpty repo for " + did);
+			if (!repo?.byteLength) throw new Error("Got empty repo for " + did);
 		} catch (err) {
-			console.warn(err);
+			console.warn("Error while getting repo bytes for " + did, err);
 			return;
 		}
 

@@ -39,7 +39,8 @@ export async function writeWorker() {
 	const db = new bsky.Database({
 		url: process.env.BSKY_DB_POSTGRES_URL,
 		schema: process.env.BSKY_DB_POSTGRES_SCHEMA,
-		poolSize: 5,
+		poolSize: 8,
+		poolIdleTimeoutMs: 60_000,
 	});
 
 	const idResolver = new IdResolver({

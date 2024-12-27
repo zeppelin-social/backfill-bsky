@@ -128,6 +128,11 @@ if (cluster.isPrimary) {
 		for (const collection of writeWorkerAllocations[i]) {
 			collectionToWriteWorkerId.set(collection, worker.id);
 		}
+		worker.on("error", (err) => {
+			console.error(`Write worker error: ${err}`);
+			worker.kill();
+			cluster.fork();
+		});
 	};
 	for (let i = 0; i < 3; i++) {
 		spawnWriteWorker(i);
@@ -138,6 +143,11 @@ if (cluster.isPrimary) {
 		const worker = cluster.fork({ WORKER_KIND: "repo" });
 		if (!worker.process?.pid) throw new Error("Worker process not found");
 		pidToWorkerInfo.set(worker.process.pid, { kind: "repo" });
+		worker.on("error", (err) => {
+			console.error(`Repo worker error: ${err}`);
+			worker.kill();
+			cluster.fork();
+		});
 	};
 
 	const numCPUs = os.availableParallelism();
@@ -216,8 +226,8 @@ if (cluster.isPrimary) {
 			if (pds.includes("blueski.social")) continue;
 			// This may be faster as a single set difference?
 			if (seenDids.has(did)) continue;
-			// Wait for queue to be below 100 before adding another job
-			await fetchQueue.onSizeLessThan(100);
+			// Wait for queue to be below 250 before adding another job
+			await fetchQueue.onSizeLessThan(250);
 			void fetchQueue.add(() => queueRepo(pds, did)).catch((e) =>
 				console.error(`Error queuing repo for ${did} `, e)
 			);
