@@ -12,10 +12,10 @@ import Queue from "bee-queue";
 import CacheableLookup from "cacheable-lookup";
 import { pack, unpack } from "msgpackr";
 import cluster from "node:cluster";
-import fs from "node:fs";
+import fs from "node:fs/promises";
 import * as os from "node:os";
+import path from "node:path";
 import PQueue from "p-queue";
-import * as shm from "shm-typed-array";
 import { Agent, RetryAgent, setGlobalDispatcher } from "undici";
 import { fetchAllDids, sleep } from "../util/fetch.js";
 import { type CommitMessage, repoWorker } from "./workers/repo.js";
@@ -89,6 +89,8 @@ const queue = new Queue<{ did: string }>("repo-processing", {
 	removeOnFailure: true,
 });
 
+const PENDING_SENDS: Record<string, number> = {};
+
 if (cluster.isPrimary) {
 	const db = new bsky.Database({
 		url: process.env.BSKY_DB_POSTGRES_URL,
@@ -117,6 +119,8 @@ if (cluster.isPrimary) {
 	const redis = createClient();
 	await redis.connect();
 
+	const REPOS_DIR = await fs.mkdtemp(path.join(os.tmpdir(), "backfill-bsky-repos-"));
+
 	const pidToWorkerInfo = new Map<number, { kind: "repo" } | { kind: "write"; index: number }>();
 	const collectionToWriteWorkerId = new Map<string, number>();
 
@@ -140,7 +144,7 @@ if (cluster.isPrimary) {
 
 	// Initialize repo workers
 	const spawnRepoWorker = () => {
-		const worker = cluster.fork({ WORKER_KIND: "repo" });
+		const worker = cluster.fork({ WORKER_KIND: "repo", REPOS_DIR });
 		if (!worker.process?.pid) throw new Error("Worker process not found");
 		pidToWorkerInfo.set(worker.process.pid, { kind: "repo" });
 		worker.on("error", (err) => {
@@ -180,9 +184,10 @@ if (cluster.isPrimary) {
 	});
 
 	cluster.on("message", (_, message: WorkerMessage) => {
-		if (message?.type !== "commit" || !message.collection || !message.data) {
+		if (message?.type !== "commit" || !message.collection || !message.commits) {
 			throw new Error(`Received invalid worker message: ${JSON.stringify(message)}`);
 		}
+		if (!message.commits.length) return;
 
 		const writeWorkerId = collectionToWriteWorkerId.get(message.collection);
 		// Repos can contain non-Bluesky records, just ignore them
@@ -191,7 +196,12 @@ if (cluster.isPrimary) {
 		if (!writeWorker) {
 			throw new Error(`Could not find write worker for collection ${message.collection}`);
 		}
-		writeWorker.send(message);
+
+		PENDING_SENDS[message.collection] = (PENDING_SENDS[message.collection] || 0) + 1;
+		writeWorker.send(message, () => {
+			PENDING_SENDS[message.collection]--;
+			if (PENDING_SENDS[message.collection] < 0) PENDING_SENDS[message.collection] = 0;
+		});
 	});
 
 	process.on("beforeExit", async () => {
@@ -219,6 +229,10 @@ if (cluster.isPrimary) {
 		console.log(`Filtering out seen DIDs from ${repos.length} total`);
 
 		const seenDids = new Set(await redis.sMembers("backfill:seen"));
+
+		setInterval(() => {
+			console.log(`> PENDING SENDS: ${JSON.stringify(PENDING_SENDS)}`);
+		}, 1000);
 
 		console.log(`Queuing ${repos.length} repos for processing`);
 		for (const [did, pds] of repos) {
@@ -279,8 +293,7 @@ if (cluster.isPrimary) {
 				params: { did: did as `did:${string}` },
 			});
 			if (repo?.length) {
-				const shared = shm.create(repo.length, "Uint8Array", did);
-				if (shared) shared.set(repo);
+				await Bun.write(path.join(REPOS_DIR, did), repo);
 				await queue.createJob({ did }).setId(did).save();
 			}
 		} catch (err) {
@@ -300,16 +313,16 @@ if (cluster.isPrimary) {
 
 	async function readOrFetchDids(): Promise<Array<[string, string]>> {
 		try {
-			return unpack(fs.readFileSync("dids.cache"));
+			return unpack(await fs.readFile("dids.cache"), { lazy: true });
 		} catch (err: any) {
 			const dids = await fetchAllDids();
-			writeDids(dids);
+			await writeDids(dids);
 			return dids;
 		}
 	}
 
 	function writeDids(dids: Array<[string, string]>) {
-		fs.writeFileSync("dids.cache", pack(dids));
+		return fs.writeFile("dids.cache", pack(dids));
 	}
 
 	const backoffs = [1_000, 5_000, 15_000, 30_000, 60_000, 120_000, 300_000];

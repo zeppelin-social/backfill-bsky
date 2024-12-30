@@ -2,13 +2,16 @@ import { iterateAtpRepo } from "@atcute/car";
 import { parse as parseTID } from "@atcute/tid";
 import { createClient } from "@redis/client";
 import Queue from "bee-queue";
-import * as shm from "shm-typed-array";
+import fs from "node:fs/promises";
+import path from "node:path";
 
 export type CommitData = { uri: string; cid: string; timestamp: string; obj: unknown };
 
-export type CommitMessage = { type: "commit"; collection: string; data: CommitData };
+export type CommitMessage = { type: "commit"; collection: string; commits: CommitData[] };
 
 export async function repoWorker() {
+	if (!process.env.REPOS_DIR) throw new Error("Missing env var REPOS_DIR");
+
 	const queue = new Queue<{ did: string }>("repo-processing", {
 		removeOnSuccess: true,
 		removeOnFailure: true,
@@ -16,6 +19,8 @@ export async function repoWorker() {
 
 	const redis = createClient();
 	await redis.connect();
+
+	const commitData: Record<string, CommitData[]> = {};
 
 	queue.process(30, async (job) => {
 		if (!process?.send) throw new Error("Not a worker process");
@@ -27,11 +32,12 @@ export async function repoWorker() {
 			return;
 		}
 
-		let repo;
+		let repo: Uint8Array | null;
 		try {
-			repo = shm.get(did, "Uint8Array");
-			if (!repo?.byteLength) throw new Error("Got empty repo for " + did);
+			repo = Bun.mmap(path.join(process.env.REPOS_DIR!, did));
+			if (!repo?.byteLength) throw "Got empty repo";
 		} catch (err) {
+			if (`${err}`.includes("ENOENT")) return;
 			console.warn("Error while getting repo bytes for " + did, err);
 			return;
 		}
@@ -65,14 +71,16 @@ export async function repoWorker() {
 					timestamp: new Date(indexedAt).toISOString(),
 					obj: record,
 				};
-				process.send({ type: "commit", collection, data } satisfies CommitMessage);
+
+				(commitData[collection] ??= []).push(data);
 			}
 			await redis.sAdd("backfill:seen", did);
 			console.timeEnd(`Processing repo: ${did}`);
 		} catch (err) {
 			console.warn(`iterateAtpRepo error for did ${did} --- ${err}`);
 		} finally {
-			shm.destroy(did);
+			repo = null;
+			await fs.unlink(path.join(process.env.REPOS_DIR!, did));
 		}
 	});
 
@@ -85,4 +93,11 @@ export async function repoWorker() {
 		console.error(`Job failed for ${job.data.did}:`, err);
 		process.exit(1);
 	});
+
+	setTimeout(function sendCommits() {
+		for (const [collection, commits] of Object.entries(commitData)) {
+			process.send!({ type: "commit", collection, commits } satisfies CommitMessage);
+		}
+		setTimeout(sendCommits, 200);
+	}, 200);
 }

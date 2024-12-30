@@ -1,5 +1,5 @@
 import LargeMap from "large-map";
-import { errors } from "undici";
+import { errors, type Headers } from "undici";
 
 export async function fetchPdses(): Promise<Array<string>> {
 	const data = await fetch(

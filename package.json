@@ -13,6 +13,7 @@
 	"author": "",
 	"license": "ISC",
 	"devDependencies": {
+		"@types/bun": "^1.1.14",
 		"@types/node": "^22.9.4",
 		"@types/pg": "^8.11.10",
 		"dprint": "^0.47.5",

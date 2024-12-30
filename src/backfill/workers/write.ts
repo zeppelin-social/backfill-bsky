@@ -54,43 +54,61 @@ export async function writeWorker() {
 		idResolver,
 	});
 
-	const queues: Record<string, Set<ToInsertCommit>> = {};
+	const queues: Record<string, ToInsertCommit[]> = {};
 	{}
 
 	for (const collection of collections) {
 		if (!indexingSvc.findIndexerForCollection(collection)) {
 			throw new Error(`No indexer for collection ${collection}`);
 		}
-		queues[collection] = new Set();
+		queues[collection] = [];
 	}
 
 	process.on("message", async (msg: CommitMessage) => {
 		if (msg.type !== "commit") throw new Error(`Invalid message type ${msg.type}`);
 
-		const { uri, cid, timestamp, obj } = msg.data;
-		if (!uri || !cid || !timestamp || !obj) {
-			throw new Error(`Invalid commit data ${JSON.stringify(msg.data)}`);
-		}
 		if (!queues[msg.collection]) return;
 
-		// The appview IndexingService does lex validation on the record, which only accepts blob refs in the
-		// form of a BlobRef instance, so we need to do this expensive iteration over every single record
-		convertBlobRefs(obj);
+		for (const commit of msg.commits) {
+			const { uri, cid, timestamp, obj } = commit;
+			if (!uri || !cid || !timestamp || !obj) {
+				throw new Error(`Invalid commit data ${JSON.stringify(commit)}`);
+			}
 
-		queues[msg.collection].add({ uri: new AtUri(uri), cid: CID.parse(cid), timestamp, obj });
+			// The appview IndexingService does lex validation on the record, which only accepts blob refs in the
+			// form of a BlobRef instance, so we need to do this expensive iteration over every single record
+			convertBlobRefs(obj);
+
+			queues[msg.collection].push({
+				uri: new AtUri(uri),
+				cid: CID.parse(cid),
+				timestamp,
+				obj,
+			});
+		}
 	});
 
 	process.on("uncaughtException", (err) => {
 		console.error(`Uncaught exception in worker ${workerIndex}`, err);
 	});
 
-	setTimeout(async function processQueue() {
+	let queueTimer = setTimeout(processQueue, 1000);
+	setInterval(() => {
+		for (const collection of collections) {
+			if (queues[collection].length > 500_000) {
+				clearTimeout(queueTimer);
+				queueTimer = setImmediate(processQueue);
+			}
+		}
+	}, 100);
+
+	async function processQueue() {
 		try {
 			const records = new Map<string, ToInsertCommit[]>();
 			for (const collection of collections) {
-				if (queues[collection].size > 0) {
-					records.set(collection, Array.from(queues[collection]));
-					queues[collection].clear();
+				if (queues[collection].length > 0) {
+					records.set(collection, queues[collection]);
+					queues[collection] = [];
 				}
 			}
 
@@ -103,9 +121,9 @@ export async function writeWorker() {
 			console.error(`Error processing queue for ${collections.join(", ")}`, err);
 			console.timeEnd(`Writing records for ${collections.join(", ")}`);
 		} finally {
-			setTimeout(processQueue, 1000);
+			queueTimer = setTimeout(processQueue, 1000);
 		}
-	}, 1000);
+	}
 }
 
 function convertBlobRefs(obj: unknown): unknown {
