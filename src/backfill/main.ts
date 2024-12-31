@@ -11,7 +11,7 @@ import { createClient } from "@redis/client";
 import Queue from "bee-queue";
 import CacheableLookup from "cacheable-lookup";
 import { pack, unpack } from "msgpackr";
-import cluster from "node:cluster";
+import cluster, { type Worker } from "node:cluster";
 import fs from "node:fs/promises";
 import * as os from "node:os";
 import path from "node:path";
@@ -19,7 +19,8 @@ import PQueue from "p-queue";
 import { Agent, RetryAgent, setGlobalDispatcher } from "undici";
 import { fetchAllDids, sleep } from "../util/fetch.js";
 import { type CommitMessage, repoWorker } from "./workers/repo.js";
-import { writeWorker, writeWorkerAllocations } from "./workers/write.js";
+import { writeCollectionWorker, writeWorkerAllocations } from "./workers/writeCollection.js";
+import { writeRecordWorker } from "./workers/writeRecord";
 
 type WorkerMessage = CommitMessage;
 
@@ -121,25 +122,44 @@ if (cluster.isPrimary) {
 
 	const REPOS_DIR = await fs.mkdtemp(path.join(os.tmpdir(), "backfill-bsky-repos-"));
 
-	const pidToWorkerInfo = new Map<number, { kind: "repo" } | { kind: "write"; index: number }>();
+	const pidToWorkerInfo = new Map<
+		number,
+		{ kind: "repo" } | { kind: "writeCollection"; index: number } | { kind: "writeRecord" }
+	>();
 	const collectionToWriteWorkerId = new Map<string, number>();
+	let writeRecordWorker: Worker | undefined;
 
 	// Initialize write workers and track which collections they're responsible for
-	const spawnWriteWorker = (i: number) => {
-		const worker = cluster.fork({ WORKER_KIND: "write", WORKER_INDEX: `${i}` });
+	const spawnWriteCollectionWorker = (i: number) => {
+		const worker = cluster.fork({ WORKER_KIND: "writeCollection", WORKER_INDEX: `${i}` });
 		if (!worker.process?.pid) throw new Error("Worker process not found");
-		pidToWorkerInfo.set(worker.process.pid, { kind: "write", index: i });
+		pidToWorkerInfo.set(worker.process.pid, { kind: "writeCollection", index: i });
 		for (const collection of writeWorkerAllocations[i]) {
 			collectionToWriteWorkerId.set(collection, worker.id);
 		}
 		worker.on("error", (err) => {
-			console.error(`Write worker error: ${err}`);
+			console.error(`Write collection worker error: ${err}`);
 			worker.kill();
 			cluster.fork();
 		});
 	};
 	for (let i = 0; i < 3; i++) {
-		spawnWriteWorker(i);
+		spawnWriteCollectionWorker(i);
+	}
+
+	const spawnWriteRecordWorker = () => {
+		writeRecordWorker = cluster.fork({ WORKER_KIND: "writeRecord" });
+		if (!writeRecordWorker.process?.pid) throw new Error("Worker process not found");
+		pidToWorkerInfo.set(writeRecordWorker.process.pid, { kind: "writeRecord" });
+		writeRecordWorker.on("error", (err) => {
+			console.error(`Write record worker error: ${err}`);
+			writeRecordWorker?.kill();
+			cluster.fork();
+		});
+	};
+
+	if (writeRecordWorker === undefined) {
+		spawnWriteRecordWorker();
 	}
 
 	// Initialize repo workers
@@ -169,8 +189,10 @@ if (cluster.isPrimary) {
 			cluster.fork();
 		} else {
 			pidToWorkerInfo.delete(pid);
-			if (workerInfo.kind === "write") {
-				spawnWriteWorker(workerInfo.index);
+			if (workerInfo.kind === "writeCollection") {
+				spawnWriteCollectionWorker(workerInfo.index);
+			} else if (workerInfo.kind === "writeRecord") {
+				spawnWriteRecordWorker();
 			} else if (workerInfo.kind === "repo") {
 				spawnRepoWorker();
 			} else {
@@ -189,10 +211,10 @@ if (cluster.isPrimary) {
 		}
 		if (!message.commits.length) return;
 
-		const writeWorkerId = collectionToWriteWorkerId.get(message.collection);
+		const writeCollectionWorkerId = collectionToWriteWorkerId.get(message.collection);
 		// Repos can contain non-Bluesky records, just ignore them
-		if (writeWorkerId === undefined) return;
-		const writeWorker = cluster.workers?.[writeWorkerId];
+		if (writeCollectionWorkerId === undefined) return;
+		const writeWorker = cluster.workers?.[writeCollectionWorkerId];
 		if (!writeWorker) {
 			throw new Error(`Could not find write worker for collection ${message.collection}`);
 		}
@@ -202,6 +224,7 @@ if (cluster.isPrimary) {
 			PENDING_SENDS[message.collection]--;
 			if (PENDING_SENDS[message.collection] < 0) PENDING_SENDS[message.collection] = 0;
 		});
+		writeRecordWorker?.send(message);
 	});
 
 	process.on("beforeExit", async () => {
@@ -354,8 +377,10 @@ if (cluster.isPrimary) {
 } else {
 	if (process.env.WORKER_KIND === "repo") {
 		void repoWorker();
-	} else if (process.env.WORKER_KIND === "write") {
-		void writeWorker();
+	} else if (process.env.WORKER_KIND === "writeCollection") {
+		void writeCollectionWorker();
+	} else if (process.env.WORKER_KIND === "writeRecord") {
+		void writeRecordWorker();
 	} else {
 		throw new Error(`Unknown worker kind: ${process.env.WORKER_KIND}`);
 	}

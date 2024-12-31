@@ -5,7 +5,7 @@ import * as bsky from "@futuristick/atproto-bsky";
 import { CID } from "multiformats/cid";
 import type { CommitMessage } from "./repo.js";
 
-type ToInsertCommit = { uri: AtUri; cid: CID; timestamp: string; obj: unknown };
+export type ToInsertCommit = { uri: AtUri; cid: CID; timestamp: string; obj: unknown };
 
 // 3 write workers, each handles 5 record types
 // picked largely based on vibes to kind of evenly distribute load
@@ -29,7 +29,7 @@ export const writeWorkerAllocations = [[
 	"app.bsky.graph.listblock",
 ]];
 
-export async function writeWorker() {
+export async function writeCollectionWorker() {
 	const workerIndex = parseInt(process.env.WORKER_INDEX || "-1");
 	const collections = writeWorkerAllocations[workerIndex];
 
@@ -113,20 +113,20 @@ export async function writeWorker() {
 			}
 
 			if (records.size > 0) {
-				console.time(`Writing records for ${collections.join(", ")}`);
-				await indexingSvc.indexRecordsBulkAcrossCollections(records);
-				console.timeEnd(`Writing records for ${collections.join(", ")}`);
+				console.time(`Writing records by collection for ${collections.join(", ")}`);
+				await indexingSvc.indexRecordsByCollectionBulk(records);
+				console.timeEnd(`Writing records by collection for ${collections.join(", ")}`);
 			}
 		} catch (err) {
 			console.error(`Error processing queue for ${collections.join(", ")}`, err);
-			console.timeEnd(`Writing records for ${collections.join(", ")}`);
+			console.timeEnd(`Writing records by collection for ${collections.join(", ")}`);
 		} finally {
 			queueTimer = setTimeout(processQueue, 1000);
 		}
 	}
 }
 
-function convertBlobRefs(obj: unknown): unknown {
+export function convertBlobRefs(obj: unknown): unknown {
 	if (!obj) return obj;
 	if (Array.isArray(obj)) {
 		for (let i = 0; i < obj.length; i++) {
