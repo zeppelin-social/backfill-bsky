@@ -22,7 +22,7 @@ export async function repoWorker() {
 
 	const commitData: Record<string, CommitData[]> = {};
 
-	queue.process(30, async (job) => {
+	queue.process(25, async (job) => {
 		if (!process?.send) throw new Error("Not a worker process");
 
 		const { did } = job.data;
@@ -98,6 +98,6 @@ export async function repoWorker() {
 		for (const [collection, commits] of Object.entries(commitData)) {
 			process.send!({ type: "commit", collection, commits } satisfies CommitMessage);
 		}
-		setTimeout(sendCommits, 200);
-	}, 200);
+		setTimeout(sendCommits, 150);
+	}, 150);
 }

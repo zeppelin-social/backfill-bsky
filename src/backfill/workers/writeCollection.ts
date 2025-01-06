@@ -64,6 +64,8 @@ export async function writeCollectionWorker() {
 		queues[collection] = [];
 	}
 
+	let queueTimer = setTimeout(processQueue, 1000);
+
 	process.on("message", async (msg: CommitMessage) => {
 		if (msg.type !== "commit") throw new Error(`Invalid message type ${msg.type}`);
 
@@ -86,21 +88,16 @@ export async function writeCollectionWorker() {
 				obj,
 			});
 		}
+
+		if (queues[msg.collection].length > 500_000) {
+			clearTimeout(queueTimer);
+			queueTimer = setImmediate(processQueue);
+		}
 	});
 
 	process.on("uncaughtException", (err) => {
 		console.error(`Uncaught exception in worker ${workerIndex}`, err);
 	});
-
-	let queueTimer = setTimeout(processQueue, 1000);
-	setInterval(() => {
-		for (const collection of collections) {
-			if (queues[collection].length > 500_000) {
-				clearTimeout(queueTimer);
-				queueTimer = setImmediate(processQueue);
-			}
-		}
-	}, 100);
 
 	async function processQueue() {
 		try {

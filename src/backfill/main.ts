@@ -220,11 +220,11 @@ if (cluster.isPrimary) {
 		}
 
 		PENDING_SENDS[message.collection] = (PENDING_SENDS[message.collection] || 0) + 1;
-		writeWorker.send(message, () => {
+		writeRecordWorker!.send(message, () => {
 			PENDING_SENDS[message.collection]--;
 			if (PENDING_SENDS[message.collection] < 0) PENDING_SENDS[message.collection] = 0;
 		});
-		writeRecordWorker?.send(message);
+		writeWorker.send(message);
 	});
 
 	process.on("beforeExit", async () => {
@@ -241,6 +241,10 @@ if (cluster.isPrimary) {
 		console.log("Closing DB connections");
 		await db.pool.end();
 		await redis.disconnect();
+	});
+
+	process.on("exit", (code) => {
+		console.log(`Exiting with code ${code}`);
 	});
 
 	// Aim to be fetching ~100 repos at a time

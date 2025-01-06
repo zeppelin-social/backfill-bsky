@@ -28,6 +28,8 @@ export async function writeRecordWorker() {
 
 	let queue: ToInsertCommit[] = [];
 
+	let queueTimer = setTimeout(processQueue, 500);
+
 	process.on("message", async (msg: CommitMessage) => {
 		if (msg.type !== "commit") throw new Error(`Invalid message type ${msg.type}`);
 
@@ -43,22 +45,19 @@ export async function writeRecordWorker() {
 
 			queue.push({ uri: new AtUri(uri), cid: CID.parse(cid), timestamp, obj });
 		}
+
+		if (queue.length > 200_000) {
+			clearTimeout(queueTimer);
+			queueTimer = setImmediate(processQueue);
+		}
 	});
 
 	process.on("uncaughtException", (err) => {
 		console.error(`Uncaught exception in write record worker`, err);
 	});
 
-	let queueTimer = setTimeout(processQueue, 500);
-	setInterval(() => {
-		if (queue.length > 200_000) {
-			clearTimeout(queueTimer);
-			queueTimer = setImmediate(processQueue);
-		}
-	}, 100);
-
 	async function processQueue() {
-		const time = `Writing ${queue.length} records`;
+		const time = `Writing records: ${queue.length}`;
 		try {
 			if (queue.length > 0) {
 				const records = [...queue];
