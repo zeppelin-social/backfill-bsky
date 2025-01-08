@@ -4,21 +4,21 @@ import { fetchPdses } from "./util/fetch.js";
 declare global {
 	namespace NodeJS {
 		interface ProcessEnv {
-			BSKY_REPO_PROVIDER: string;
+			BGS_HOSTNAME: string;
 			BSKY_DB_POSTGRES_URL: string;
 			BGS_ADMIN_KEY: string;
 		}
 	}
 }
 
-for (const envVar of ["BSKY_REPO_PROVIDER", "BSKY_DB_POSTGRES_URL", "BGS_ADMIN_KEY"]) {
+for (const envVar of ["BGS_HOSTNAME", "BSKY_DB_POSTGRES_URL", "BGS_ADMIN_KEY"]) {
 	if (!process.env[envVar]) throw new Error(`Missing env var ${envVar}`);
 }
 
 async function main() {
 	const pdses = (await fetchPdses()).map((url) => new URL(url));
 
-	const bgs = "https://" + process.env.BSKY_REPO_PROVIDER.replace(/^[a-z]+:\/\//, "");
+	const bgs = "https://" + process.env.BGS_HOSTNAME;
 
 	if (!process.argv.includes("--no-crawl")) {
 		console.log("Requesting crawls...");

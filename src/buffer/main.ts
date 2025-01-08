@@ -6,12 +6,12 @@ import { serializeEvent } from "./serialize.js";
 declare global {
 	namespace NodeJS {
 		interface ProcessEnv {
-			BSKY_REPO_PROVIDER: string;
+			BUFFER_REPO_PROVIDER: string;
 		}
 	}
 }
 
-for (const envVar of ["BSKY_REPO_PROVIDER"]) {
+for (const envVar of ["BUFFER_REPO_PROVIDER"]) {
 	if (!process.env[envVar]) throw new Error(`Missing env var ${envVar}`);
 }
 
@@ -22,7 +22,7 @@ function main() {
 	const runner = new MemoryRunner({ startCursor: 0 });
 	const firehose = new Firehose({
 		idResolver,
-		service: process.env.BSKY_REPO_PROVIDER,
+		service: process.env.BUFFER_REPO_PROVIDER,
 		runner,
 		unauthenticatedCommits: true,
 		unauthenticatedHandles: true,
