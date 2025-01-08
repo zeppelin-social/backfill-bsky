@@ -20,7 +20,7 @@ export async function repoWorker() {
 	const redis = createClient();
 	await redis.connect();
 
-	const commitData: Record<string, CommitData[]> = {};
+	let commitData: Record<string, CommitData[]> = {};
 
 	queue.process(25, async (job) => {
 		if (!process?.send) throw new Error("Not a worker process");
@@ -95,9 +95,11 @@ export async function repoWorker() {
 	});
 
 	setTimeout(function sendCommits() {
-		for (const [collection, commits] of Object.entries(commitData)) {
+		const entries = Object.entries(commitData);
+		commitData = {};
+		for (const [collection, commits] of entries) {
 			process.send!({ type: "commit", collection, commits } satisfies CommitMessage);
 		}
-		setTimeout(sendCommits, 150);
-	}, 150);
+		setTimeout(sendCommits, 200);
+	}, 200);
 }
