@@ -39,7 +39,7 @@ export async function writeCollectionWorker() {
 	const db = new bsky.Database({
 		url: process.env.BSKY_DB_POSTGRES_URL,
 		schema: process.env.BSKY_DB_POSTGRES_SCHEMA,
-		poolSize: 8,
+		poolSize: 50,
 		poolIdleTimeoutMs: 60_000,
 	});
 
@@ -96,25 +96,27 @@ export async function writeCollectionWorker() {
 	});
 
 	async function processQueue() {
-		try {
-			const records = new Map<string, ToInsertCommit[]>();
-			for (const collection of collections) {
-				if (queues[collection].length > 0) {
-					records.set(collection, queues[collection]);
-					queues[collection] = [];
-				}
+		const records = new Map<string, ToInsertCommit[]>();
+		for (const collection of collections) {
+			if (queues[collection].length > 0) {
+				records.set(collection, queues[collection]);
+				queues[collection] = [];
 			}
+		}
 
+		queueTimer = setTimeout(processQueue, 1000);
+
+		const time = `Writing ${records.size} records by collection for ${collections.join(", ")}`;
+
+		try {
 			if (records.size > 0) {
-				console.time(`Writing records by collection for ${collections.join(", ")}`);
+				console.time(time);
 				await indexingSvc.indexRecordsByCollectionBulk(records);
-				console.timeEnd(`Writing records by collection for ${collections.join(", ")}`);
+				console.timeEnd(time);
 			}
 		} catch (err) {
 			console.error(`Error processing queue for ${collections.join(", ")}`, err);
-			console.timeEnd(`Writing records by collection for ${collections.join(", ")}`);
-		} finally {
-			queueTimer = setTimeout(processQueue, 1000);
+			console.timeEnd(time);
 		}
 	}
 }

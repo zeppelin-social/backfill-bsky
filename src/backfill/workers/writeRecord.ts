@@ -11,7 +11,7 @@ export async function writeRecordWorker() {
 	const db = new bsky.Database({
 		url: process.env.BSKY_DB_POSTGRES_URL,
 		schema: process.env.BSKY_DB_POSTGRES_SCHEMA,
-		poolSize: 3,
+		poolSize: 20,
 		poolIdleTimeoutMs: 60_000,
 	});
 
@@ -54,10 +54,14 @@ export async function writeRecordWorker() {
 
 	async function processQueue() {
 		const time = `Writing records: ${queue.length}`;
+
+		const records = [...queue];
+		queue = [];
+
+		queueTimer = setTimeout(processQueue, 500);
+
 		try {
-			if (queue.length > 0) {
-				const records = [...queue];
-				queue = [];
+			if (records.length > 0) {
 				console.time(time);
 				await indexingSvc.indexRecordsGenericBulk(records);
 				console.timeEnd(time);
@@ -65,8 +69,6 @@ export async function writeRecordWorker() {
 		} catch (err) {
 			console.error(`Error processing queue`, err);
 			console.timeEnd(time);
-		} finally {
-			queueTimer = setTimeout(processQueue, 500);
 		}
 	}
 }
