@@ -48,11 +48,7 @@ export async function writeCollectionWorker() {
 		didCache: new MemoryCache(),
 	});
 
-	const { indexingSvc } = new bsky.RepoSubscription({
-		service: process.env.BSKY_REPO_PROVIDER,
-		db,
-		idResolver,
-	});
+	const { indexingSvc } = new bsky.RepoSubscription({ service: "", db, idResolver });
 
 	const queues: Record<string, ToInsertCommit[]> = {};
 	{}

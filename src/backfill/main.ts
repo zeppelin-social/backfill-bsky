@@ -29,20 +29,12 @@ declare global {
 		interface ProcessEnv {
 			BSKY_DB_POSTGRES_URL: string;
 			BSKY_DB_POSTGRES_SCHEMA: string;
-			BSKY_REPO_PROVIDER: string;
 			BSKY_DID_PLC_URL: string;
 		}
 	}
 }
 
-for (
-	const envVar of [
-		"BSKY_DB_POSTGRES_URL",
-		"BSKY_DB_POSTGRES_SCHEMA",
-		"BSKY_REPO_PROVIDER",
-		"BSKY_DID_PLC_URL",
-	]
-) {
+for (const envVar of ["BSKY_DB_POSTGRES_URL", "BSKY_DB_POSTGRES_SCHEMA", "BSKY_DID_PLC_URL"]) {
 	if (!process.env[envVar]) throw new Error(`Missing env var ${envVar}`);
 }
 
