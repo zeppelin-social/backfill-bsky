@@ -82,8 +82,6 @@ const queue = new Queue<{ did: string }>("repo-processing", {
 	removeOnFailure: true,
 });
 
-const PENDING_SENDS: Record<string, number> = {};
-
 if (cluster.isPrimary) {
 	const db = new bsky.Database({
 		url: process.env.BSKY_DB_POSTGRES_URL,
@@ -114,10 +112,16 @@ if (cluster.isPrimary) {
 
 	const REPOS_DIR = await fs.mkdtemp(path.join(os.tmpdir(), "backfill-bsky-repos-"));
 
-	const workers = { repo: {}, writeCollection: {}, writeRecord: { pid: 0, id: 0 } } as {
+	const workers = {
+		repo: {},
+		writeCollection: {},
+		writeRecord: { pid: 0, id: 0 },
+		writeRecord2: { pid: 0, id: 0 },
+	} as {
 		repo: Record<number, { kind: "repo" }>;
 		writeCollection: Record<number, { kind: "writeCollection"; index: number }>;
 		writeRecord: { pid: number; id: number };
+		writeRecord2: { pid: number; id: number };
 	};
 
 	const collectionToWriteWorkerId = new Map<string, number>();
@@ -150,6 +154,16 @@ if (cluster.isPrimary) {
 			worker.kill();
 			cluster.fork();
 		});
+
+		const worker2 = cluster.fork({ WORKER_KIND: "writeRecord" });
+		if (!worker2.process?.pid) throw new Error("Worker process not found");
+		workers.writeRecord2.pid = worker2.process.pid;
+		workers.writeRecord2.id = worker2.id;
+		worker2.on("error", (err) => {
+			console.error(`Write record worker error: ${err}`);
+			worker2.kill();
+			cluster.fork();
+		});
 	};
 
 	if (!workers.writeRecord.pid) {
@@ -179,6 +193,10 @@ if (cluster.isPrimary) {
 		if (pid in workers.writeCollection) {
 			spawnWriteCollectionWorker(workers.writeCollection[pid].index);
 		} else if (pid === workers.writeRecord.pid) {
+			cluster.workers?.[workers.writeRecord.id]?.kill();
+			spawnWriteRecordWorker();
+		} else if (pid === workers.writeRecord2.pid) {
+			cluster.workers?.[workers.writeRecord2.id]?.kill();
 			spawnWriteRecordWorker();
 		} else if (pid in workers.repo) {
 			spawnRepoWorker();
@@ -198,7 +216,9 @@ if (cluster.isPrimary) {
 		if (writeCollectionWorkerId === undefined) return;
 
 		const writeCollectionWorker = cluster.workers?.[writeCollectionWorkerId];
-		const writeRecordWorker = cluster.workers?.[workers.writeRecord.id];
+		const writeRecordWorker = Math.random() < 0.5
+			? cluster.workers?.[workers.writeRecord.id]
+			: cluster.workers?.[workers.writeRecord2.id];
 
 		writeRecordWorker!.send(message);
 		writeCollectionWorker!.send(message);
@@ -212,8 +232,8 @@ if (cluster.isPrimary) {
 			),
 		);
 
-		// console.log("Recreating indexes");
-		// await Promise.all(indexes.rows.map(({ createcmd }) => db.pool.query(createcmd)));
+		console.log("Recreating indexes");
+		await Promise.all(indexes.rows.map(({ createcmd }) => db.pool.query(createcmd)));
 
 		console.log("Closing DB connections");
 		await db.pool.end();
@@ -233,10 +253,6 @@ if (cluster.isPrimary) {
 		console.log(`Filtering out seen DIDs from ${repos.length} total`);
 
 		const seenDids = new Set(await redis.sMembers("backfill:seen"));
-
-		setInterval(() => {
-			console.log(`> PENDING SENDS: ${JSON.stringify(PENDING_SENDS)}`);
-		}, 1000);
 
 		console.log(`Queuing ${repos.length} repos for processing`);
 		for (const [did, pds] of repos) {
