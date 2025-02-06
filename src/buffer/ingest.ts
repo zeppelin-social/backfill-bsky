@@ -1,10 +1,6 @@
-import { IdResolver, MemoryCache } from "@atproto/identity";
-import { WriteOpAction } from "@atproto/repo";
-import type { Event } from "@atproto/sync";
-import * as bsky from "@futuristick/atproto-bsky";
+import { AppViewIndexer } from "@futuristick/bsky-indexer";
 import fs from "node:fs";
-import readline from "node:readline/promises";
-import { deserializeEvent } from "./serialize.js";
+import type { Readable } from "node:stream";
 
 declare global {
 	namespace NodeJS {
@@ -28,63 +24,69 @@ for (
 	if (!process.env[envVar]) throw new Error(`Missing env var ${envVar}`);
 }
 
-async function main() {
-	const db = new bsky.Database({
-		url: process.env.BSKY_DB_POSTGRES_URL,
-		schema: process.env.BSKY_DB_POSTGRES_SCHEMA,
-		poolSize: 10,
-	});
+class BufferReader {
+	private stream: Readable;
 
-	const idResolver = new IdResolver({
-		plcUrl: process.env.BSKY_DID_PLC_URL,
-		didCache: new MemoryCache(),
-	});
+	constructor(filename: string) {
+		this.stream = fs.createReadStream(filename);
+	}
 
-	const sub = new bsky.RepoSubscription({
-		service: process.env.BSKY_REPO_PROVIDER,
-		db,
-		idResolver,
-	});
+	async *read(): AsyncGenerator<Uint8Array> {
+		let buffer = Buffer.alloc(0);
 
-	const indexingSvc = sub.indexingSvc;
-
-	const rl = readline.createInterface({ input: fs.createReadStream("relay-buffer.jsonl") });
-
-	for await (const line of rl) {
-		let evt: Event;
 		try {
-			evt = deserializeEvent(JSON.parse(line));
-		} catch (err) {
-			console.error(err);
-			continue;
-		}
+			for await (const chunk of this.stream) {
+				buffer = Buffer.concat([buffer, chunk as Buffer]);
 
-		// https://github.com/appview-wg-bsky/atproto/blob/bbab23a6b2d3ab44c0cdc83fef0616baa39c4e04/packages/bsky/src/data-plane/server/subscription.ts#L74C7-L100C8
-		if (evt.event === "identity") {
-			await indexingSvc.indexHandle(evt.did, evt.time, true);
-		} else if (evt.event === "account") {
-			if (evt.active === false && evt.status === "deleted") {
-				await indexingSvc.deleteActor(evt.did);
-			} else {
-				await indexingSvc.updateActorStatus(evt.did, evt.active, evt.status);
+				while (buffer.length >= 4) {
+					// Read message length
+					const messageLength = buffer.readUInt32LE(0);
+					const totalLength = messageLength + 4;
+
+					// Check if we have the complete message
+					if (buffer.length >= totalLength) {
+						// Extract the message
+						const message = new Uint8Array(buffer.subarray(4, totalLength));
+
+						// Remove processed data from buffer
+						buffer = buffer.subarray(totalLength);
+
+						// Yield the message
+						yield message;
+					} else {
+						// Wait for more data
+						break;
+					}
+				}
 			}
-		} else {
-			const indexFn = evt.event === "delete"
-				? indexingSvc.deleteRecord(evt.uri)
-				: indexingSvc.indexRecord(
-					evt.uri,
-					evt.cid,
-					evt.record,
-					evt.event === "create" ? WriteOpAction.Create : WriteOpAction.Update,
-					evt.time,
-				);
-			await Promise.all([
-				indexFn,
-				indexingSvc.setCommitLastSeen(evt.did, evt.commit, evt.rev),
-				indexingSvc.indexHandle(evt.did, evt.time),
-			]);
+
+			if (buffer.length > 0) {
+				console.warn("Incomplete message at end of file");
+			}
+		} finally {
+			this.stream.destroy();
 		}
 	}
+}
+
+async function main() {
+	const reader = new BufferReader("relay.buffer");
+
+	const indexer = new AppViewIndexer({
+		service: process.env.BSKY_REPO_PROVIDER,
+		unauthenticatedCommits: true,
+		unauthenticatedHandles: true,
+		maxWorkers: 25,
+		identityResolverOptions: { plcUrl: process.env.BSKY_DID_PLC_URL },
+		databaseOptions: {
+			url: process.env.BSKY_DB_POSTGRES_URL,
+			schema: process.env.BSKY_DB_POSTGRES_SCHEMA,
+			poolSize: 500,
+		},
+		sub: reader.read(),
+	});
+
+	return indexer.start();
 }
 
 void main();

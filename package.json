@@ -30,6 +30,7 @@
 		"@atproto/sync": "^0.1.12",
 		"@atproto/syntax": "^0.3.1",
 		"@futuristick/atproto-bsky": "0.0.113-insert-batching.0",
+		"@futuristick/bsky-indexer": "latest",
 		"@redis/client": "^1.6.0",
 		"bee-queue": "^1.7.1",
 		"cacheable-lookup": "^7.0.0",

@@ -1,7 +1,5 @@
-import { IdResolver } from "@atproto/identity";
-import { Firehose, MemoryRunner } from "@atproto/sync";
+import { AppViewIndexer, type IndexerOptions } from "@futuristick/bsky-indexer";
 import * as fs from "node:fs";
-import { serializeEvent } from "./serialize.js";
 
 declare global {
 	namespace NodeJS {
@@ -15,31 +13,41 @@ for (const envVar of ["BUFFER_REPO_PROVIDER"]) {
 	if (!process.env[envVar]) throw new Error(`Missing env var ${envVar}`);
 }
 
-function main() {
-	const ws = fs.createWriteStream("relay-buffer.jsonl");
+class ToBufferIndexer extends AppViewIndexer {
+	private stream: fs.WriteStream;
 
-	const idResolver = new IdResolver();
-	const runner = new MemoryRunner({ startCursor: 0 });
-	const firehose = new Firehose({
-		idResolver,
-		service: process.env.BUFFER_REPO_PROVIDER,
-		runner,
-		unauthenticatedCommits: true,
-		unauthenticatedHandles: true,
-		handleEvent: async (event) => {
-			const ser = serializeEvent(event);
-			ws.write(JSON.stringify(ser) + "\n");
-		},
-		onError: (err) => {
-			console.error(err);
-		},
-	});
+	constructor(filename: string, opts: Omit<IndexerOptions, "databaseOptions">) {
+		super({ ...opts, minWorkers: 0, maxWorkers: 0, databaseOptions: { url: "" } });
 
-	firehose.start();
+		this.stream = fs.createWriteStream(filename);
 
-	process.on("SIGINT", () => ws.close());
-	process.on("SIGTERM", () => ws.close());
-	process.on("exit", () => ws.close());
+		process.on("SIGINT", () => this.stream.close());
+		process.on("SIGTERM", () => this.stream.close());
+		process.on("exit", () => this.stream.close());
+	}
+
+	protected override initializeWorker() {}
+	protected override checkScaling() {}
+
+	protected override sendToWorker(chunk: Uint8Array): Promise<void> {
+		const lengthBuffer = new Uint8Array(4);
+		new DataView(lengthBuffer.buffer).setUint32(0, chunk.length, true);
+		this.stream.write(lengthBuffer);
+		this.stream.write(chunk);
+		return Promise.resolve();
+	}
 }
 
-main();
+function main() {
+	const filename = "relay.buffer";
+
+	const indexer = new ToBufferIndexer(filename, {
+		service: process.env.BUFFER_REPO_PROVIDER,
+		unauthenticatedCommits: true,
+		unauthenticatedHandles: true,
+	});
+
+	return indexer.start();
+}
+
+void main();
