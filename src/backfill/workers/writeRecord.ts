@@ -1,6 +1,7 @@
 import { IdResolver, MemoryCache } from "@atproto/identity";
 import { AtUri } from "@atproto/syntax";
-import * as bsky from "@futuristick/atproto-bsky";
+import { BackgroundQueue, Database } from "@futuristick/atproto-bsky";
+import { IndexingService } from "@futuristick/atproto-bsky/dist/data-plane/server/indexing";
 import { CID } from "multiformats/cid";
 import type { CommitMessage } from "./repo.js";
 import { convertBlobRefs, type ToInsertCommit } from "./writeCollection";
@@ -8,7 +9,7 @@ import { convertBlobRefs, type ToInsertCommit } from "./writeCollection";
 export async function writeRecordWorker() {
 	console.info(`Starting write record worker`);
 
-	const db = new bsky.Database({
+	const db = new Database({
 		url: process.env.BSKY_DB_POSTGRES_URL,
 		schema: process.env.BSKY_DB_POSTGRES_SCHEMA,
 		poolSize: 20,
@@ -20,7 +21,7 @@ export async function writeRecordWorker() {
 		didCache: new MemoryCache(),
 	});
 
-	const { indexingSvc } = new bsky.RepoSubscription({ service: "", db, idResolver });
+	const indexingSvc = new IndexingService(db, idResolver, new BackgroundQueue(db));
 
 	let queue: ToInsertCommit[] = [];
 
@@ -63,7 +64,7 @@ export async function writeRecordWorker() {
 		try {
 			if (records.length > 0) {
 				console.time(time);
-				await indexingSvc.indexRecordsGenericBulk(records);
+				await indexingSvc.bulkIndexToRecordTable(records);
 				console.timeEnd(time);
 			}
 		} catch (err) {

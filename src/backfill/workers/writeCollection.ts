@@ -1,7 +1,8 @@
 import { IdResolver, MemoryCache } from "@atproto/identity";
 import { BlobRef } from "@atproto/lexicon";
 import { AtUri } from "@atproto/syntax";
-import * as bsky from "@futuristick/atproto-bsky";
+import { BackgroundQueue, Database } from "@futuristick/atproto-bsky";
+import { IndexingService } from "@futuristick/atproto-bsky/dist/data-plane/server/indexing/index";
 import { CID } from "multiformats/cid";
 import type { CommitMessage } from "./repo.js";
 
@@ -36,7 +37,7 @@ export async function writeCollectionWorker() {
 	if (!collections) throw new Error(`Invalid worker index ${workerIndex}`);
 	console.info(`Starting write worker ${workerIndex} for ${collections.join(", ")}`);
 
-	const db = new bsky.Database({
+	const db = new Database({
 		url: process.env.BSKY_DB_POSTGRES_URL,
 		schema: process.env.BSKY_DB_POSTGRES_SCHEMA,
 		poolSize: 50,
@@ -48,7 +49,7 @@ export async function writeCollectionWorker() {
 		didCache: new MemoryCache(),
 	});
 
-	const { indexingSvc } = new bsky.RepoSubscription({ service: "", db, idResolver });
+	const indexingSvc = new IndexingService(db, idResolver, new BackgroundQueue(db));
 
 	const queues: Record<string, ToInsertCommit[]> = {};
 	{}
@@ -111,7 +112,7 @@ export async function writeCollectionWorker() {
 		try {
 			if (records.size > 0) {
 				console.time(time);
-				await indexingSvc.indexRecordsByCollectionBulk(records);
+				await indexingSvc.bulkIndexToCollectionSpecificTables(records);
 				console.timeEnd(time);
 			}
 		} catch (err) {
