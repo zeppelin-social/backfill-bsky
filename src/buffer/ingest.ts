@@ -7,20 +7,12 @@ declare global {
 		interface ProcessEnv {
 			BSKY_DB_POSTGRES_URL: string;
 			BSKY_DB_POSTGRES_SCHEMA: string;
-			BSKY_REPO_PROVIDER: string;
 			BSKY_DID_PLC_URL: string;
 		}
 	}
 }
 
-for (
-	const envVar of [
-		"BSKY_DB_POSTGRES_URL",
-		"BSKY_DB_POSTGRES_SCHEMA",
-		"BSKY_REPO_PROVIDER",
-		"BSKY_DID_PLC_URL",
-	]
-) {
+for (const envVar of ["BSKY_DB_POSTGRES_URL", "BSKY_DB_POSTGRES_SCHEMA", "BSKY_DID_PLC_URL"]) {
 	if (!process.env[envVar]) throw new Error(`Missing env var ${envVar}`);
 }
 
@@ -91,7 +83,7 @@ async function main() {
 	const reader = new BufferReader("relay.buffer");
 
 	const indexer = new FromBufferSubscription(reader, {
-		service: process.env.BSKY_REPO_PROVIDER,
+		service: "",
 		minWorkers: 10,
 		maxWorkers: 10,
 		idResolverOptions: { plcUrl: process.env.BSKY_DID_PLC_URL },
