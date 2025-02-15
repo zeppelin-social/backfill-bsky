@@ -1,6 +1,7 @@
 import { FirehoseSubscription, type FirehoseSubscriptionOptions } from "@futuristick/bsky-indexer";
 import fs from "node:fs";
 import type { Readable } from "node:stream";
+import type { Worker } from "node:worker_threads";
 
 declare global {
 	namespace NodeJS {
@@ -74,8 +75,23 @@ class FromBufferSubscription extends FirehoseSubscription {
 			}
 
 			// @ts-expect-error
-			await Promise.all(this.workers.map((worker) => worker.terminate()));
-			process.exit(0);
+			this.workers.forEach((worker: Worker, i: number) => {
+				// Kill each worker after 20 seconds without a message
+				const timeout = setTimeout(() => {
+					console.warn(`Worker ${i} timed out`);
+					worker.terminate();
+				}, 20_000);
+
+				worker.on("message", () => {
+					timeout.refresh();
+				});
+			});
+
+			// Kill all workers after 300 seconds
+			setTimeout(() => {
+				console.warn("All workers timed out");
+				process.exit(1);
+			}, 300_000);
 		} catch (err) {
 			console.error(err);
 		}
