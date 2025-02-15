@@ -100,6 +100,7 @@ async function main() {
 			schema: process.env.BSKY_DB_POSTGRES_SCHEMA,
 			poolSize: 400,
 		},
+		onError: console.error,
 	});
 
 	return indexer.start();

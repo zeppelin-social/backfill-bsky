@@ -51,7 +51,10 @@ class ToBufferSubscription extends FirehoseSubscription {
 function main() {
 	const filename = "relay.buffer";
 
-	const sub = new ToBufferSubscription(filename, { service: process.env.BUFFER_REPO_PROVIDER });
+	const sub = new ToBufferSubscription(filename, {
+		service: process.env.BUFFER_REPO_PROVIDER,
+		onError: console.error,
+	});
 
 	return sub.start();
 }
