@@ -3,11 +3,13 @@
 	"type": "module",
 	"scripts": {
 		"build": "tsc",
-		"backfill": "node dist/backfill/main.js",
-		"buffer": "node dist/buffer/main.js",
-		"buffer:ingest": "node dist/buffer/ingest.js",
-		"request-crawl": "node dist/requestCrawlPdses.js",
-		"index-repos": "node dist/indexRepos.js"
+		"backfill": "bun run src/backfill/main.ts",
+		"buffer": "bun run src/buffer/main.ts",
+		"buffer:ingest": "bun run src/buffer/ingest.ts",
+		"request-crawl": "bun run src/requestCrawlPdses.ts",
+		"index-repos": "bun run src/indexRepos.ts",
+		"create-indexes": "bun run src/createIndexes.ts",
+		"drop-indexes": "bun run src/dropIndexes.ts"
 	},
 	"keywords": [],
 	"author": "",
