@@ -4,6 +4,7 @@ import fs from "node:fs";
 const db = new Database({
 	url: process.env.BSKY_DB_POSTGRES_URL,
 	schema: process.env.BSKY_DB_POSTGRES_SCHEMA,
+	poolSize: 100,
 });
 
 const indexes = await db.pool.query(`
@@ -18,6 +19,6 @@ const indexes = await db.pool.query(`
 
 await Promise.all(indexes.rows.map(({ dropcmd }) => db.pool.query(dropcmd)));
 
-const create = indexes.rows.map(({ createcmd }) => createcmd).join("\n");
+const create = indexes.rows.map(({ createcmd }) => createcmd).join(";\n");
 console.log(create);
 fs.writeFileSync("create.sql", create);
