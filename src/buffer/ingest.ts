@@ -1,4 +1,4 @@
-import { AppViewIndexer } from "@futuristick/bsky-indexer";
+import { FirehoseSubscription, type FirehoseSubscriptionOptions } from "@futuristick/bsky-indexer";
 import fs from "node:fs";
 import type { Readable } from "node:stream";
 
@@ -69,21 +69,37 @@ class BufferReader {
 	}
 }
 
+class FromBufferSubscription extends FirehoseSubscription {
+	constructor(private readonly reader: BufferReader, options: FirehoseSubscriptionOptions) {
+		super(options);
+	}
+
+	override async start() {
+		try {
+			for await (const chunk of this.reader.read()) {
+				// @ts-expect-error
+				const worker = await this.getNextWorker();
+				worker.postMessage({ type: "chunk", data: chunk });
+			}
+		} catch (err) {
+			console.error(err);
+		}
+	}
+}
+
 async function main() {
 	const reader = new BufferReader("relay.buffer");
 
-	const indexer = new AppViewIndexer({
+	const indexer = new FromBufferSubscription(reader, {
 		service: process.env.BSKY_REPO_PROVIDER,
-		unauthenticatedCommits: true,
-		unauthenticatedHandles: true,
-		maxWorkers: 25,
-		identityResolverOptions: { plcUrl: process.env.BSKY_DID_PLC_URL },
-		databaseOptions: {
+		minWorkers: 10,
+		maxWorkers: 10,
+		idResolverOptions: { plcUrl: process.env.BSKY_DID_PLC_URL },
+		dbOptions: {
 			url: process.env.BSKY_DB_POSTGRES_URL,
 			schema: process.env.BSKY_DB_POSTGRES_SCHEMA,
-			poolSize: 500,
+			poolSize: 400,
 		},
-		sub: reader.read(),
 	});
 
 	return indexer.start();

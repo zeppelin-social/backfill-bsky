@@ -1,4 +1,8 @@
-import { AppViewIndexer, type IndexerOptions } from "@futuristick/bsky-indexer";
+import {
+	FirehoseSubscription,
+	type FirehoseSubscriptionOptions,
+	type WorkerMessage,
+} from "@futuristick/bsky-indexer";
 import * as fs from "node:fs";
 
 declare global {
@@ -13,41 +17,43 @@ for (const envVar of ["BUFFER_REPO_PROVIDER"]) {
 	if (!process.env[envVar]) throw new Error(`Missing env var ${envVar}`);
 }
 
-class ToBufferIndexer extends AppViewIndexer {
+class FakeWorker {
+	constructor(private stream: fs.WriteStream) {}
+
+	postMessage(message: WorkerMessage) {
+		if (message.type === "chunk") {
+			const { data: chunk } = message;
+			const lengthBuffer = new Uint8Array(4);
+			new DataView(lengthBuffer.buffer).setUint32(0, chunk.length, true);
+			this.stream.write(lengthBuffer);
+			this.stream.write(chunk);
+		}
+	}
+}
+
+// @ts-expect-error
+class ToBufferSubscription extends FirehoseSubscription {
 	private stream: fs.WriteStream;
 
-	constructor(filename: string, opts: Omit<IndexerOptions, "databaseOptions">) {
-		super({ ...opts, minWorkers: 0, maxWorkers: 0, databaseOptions: { url: "" } });
+	constructor(filename: string, opts: Omit<FirehoseSubscriptionOptions, "dbOptions">) {
+		super({ ...opts, minWorkers: 0, maxWorkers: 0, dbOptions: { url: "" } });
 
 		this.stream = fs.createWriteStream(filename);
+		// @ts-expect-error
+		this.workers = [new FakeWorker(this.stream)];
 
-		process.on("SIGINT", () => this.stream.close());
-		process.on("SIGTERM", () => this.stream.close());
 		process.on("exit", () => this.stream.close());
 	}
 
-	protected override initializeWorker() {}
-	protected override checkScaling() {}
-
-	protected override sendToWorker(chunk: Uint8Array): Promise<void> {
-		const lengthBuffer = new Uint8Array(4);
-		new DataView(lengthBuffer.buffer).setUint32(0, chunk.length, true);
-		this.stream.write(lengthBuffer);
-		this.stream.write(chunk);
-		return Promise.resolve();
-	}
+	override checkScaling() {}
 }
 
 function main() {
 	const filename = "relay.buffer";
 
-	const indexer = new ToBufferIndexer(filename, {
-		service: process.env.BUFFER_REPO_PROVIDER,
-		unauthenticatedCommits: true,
-		unauthenticatedHandles: true,
-	});
+	const sub = new ToBufferSubscription(filename, { service: process.env.BUFFER_REPO_PROVIDER });
 
-	return indexer.start();
+	return sub.start();
 }
 
 void main();
