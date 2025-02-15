@@ -53,7 +53,7 @@ function main() {
 
 	const sub = new ToBufferSubscription(filename, {
 		service: process.env.BUFFER_REPO_PROVIDER,
-		onError: console.error,
+		onError: (err) => console.error(...(err.cause ? [err.message, err.cause] : [err])),
 	});
 
 	return sub.start();
