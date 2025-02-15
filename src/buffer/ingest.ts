@@ -75,11 +75,19 @@ class FromBufferSubscription extends FirehoseSubscription {
 			}
 
 			// @ts-expect-error
-			this.workers.forEach((worker: Worker, i: number) => {
+			const workers: Worker[] = this.workers;
+			let remainingWorkers = workers.length;
+
+			workers.forEach((worker: Worker, i: number) => {
 				// Kill each worker after 20 seconds without a message
 				const timeout = setTimeout(() => {
 					console.warn(`Worker ${i} timed out`);
 					worker.terminate();
+
+					remainingWorkers--;
+					if (remainingWorkers === 0) {
+						process.exit();
+					}
 				}, 20_000);
 
 				worker.on("message", () => {
@@ -90,7 +98,7 @@ class FromBufferSubscription extends FirehoseSubscription {
 			// Kill all workers after 300 seconds
 			setTimeout(() => {
 				console.warn("All workers timed out");
-				process.exit(1);
+				process.exit();
 			}, 300_000);
 		} catch (err) {
 			console.error(err);
