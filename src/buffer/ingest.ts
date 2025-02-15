@@ -43,7 +43,6 @@ class BufferReader {
 						// Remove processed data from buffer
 						buffer = buffer.subarray(totalLength);
 
-						// Yield the message
 						yield message;
 					} else {
 						// Wait for more data
@@ -73,6 +72,10 @@ class FromBufferSubscription extends FirehoseSubscription {
 				const worker = await this.getNextWorker();
 				worker.postMessage({ type: "chunk", data: chunk });
 			}
+
+			// @ts-expect-error
+			await Promise.all(this.workers.map((worker) => worker.terminate()));
+			process.exit(0);
 		} catch (err) {
 			console.error(err);
 		}
