@@ -111,8 +111,8 @@ async function main() {
 
 	const indexer = new FromBufferSubscription(reader, {
 		service: "",
-		minWorkers: 10,
-		maxWorkers: 10,
+		minWorkers: 4,
+		maxWorkers: 4,
 		idResolverOptions: { plcUrl: process.env.BSKY_DID_PLC_URL },
 		dbOptions: {
 			url: process.env.BSKY_DB_POSTGRES_URL,
