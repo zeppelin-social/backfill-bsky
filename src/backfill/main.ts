@@ -251,8 +251,8 @@ if (cluster.isWorker) {
 		console.log(`Filtering out seen DIDs from ${repos.length} total`);
 
 		const seenDids = new Set(await redis.sMembers("backfill:seen"));
+		console.log(`Seen: ${seenDids.size} DIDs`);
 
-		console.log(`Queuing ${repos.length} repos for processing`);
 		for (const [did, pds] of repos) {
 			// dumb pds doesn't implement getRepo
 			if (pds.includes("blueski.social")) continue;
