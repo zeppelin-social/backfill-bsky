@@ -330,7 +330,7 @@ if (cluster.isWorker) {
 		try {
 			return unpack(await fs.readFile("dids.cache"), { lazy: true });
 		} catch (err: any) {
-			console.error("Make sure you ran the fetch-dids script first");
+			console.error("Make sure you ran the fetch-dids script first", err);
 			process.exit(1);
 		}
 	}
