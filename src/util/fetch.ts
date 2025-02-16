@@ -15,7 +15,7 @@ export async function fetchPdses(): Promise<Array<string>> {
 export async function fetchAllDids(): Promise<Array<[string, string]>> {
 	console.log("Fetching DIDs");
 	const pdses = await fetchPdses();
-	const dids = new LargeMap<string, string>();
+	const dids = new LargeMap<string, string>(5_000_000);
 	await Promise.all(pdses.map((pds) => fetchPdsDids(pds, dids)));
 	console.log(`Fetched ${dids.size} DIDs`);
 
@@ -74,7 +74,7 @@ async function fetchPdsDids(pds: string, map: LargeMap<string, string>) {
 				} else {
 					console.warn(
 						`listRepos failed for ${url} at cursor ${cursor}, skipping`,
-						err instanceof Error ? err.message : err,
+						err.message || err,
 					);
 					break;
 				}
