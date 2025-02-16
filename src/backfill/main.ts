@@ -10,7 +10,7 @@ import * as bsky from "@futuristick/atproto-bsky";
 import { createClient } from "@redis/client";
 import Queue from "bee-queue";
 import CacheableLookup from "cacheable-lookup";
-import { unpack } from "msgpackr";
+import { unpackMultiple } from "msgpackr";
 import cluster from "node:cluster";
 import fs from "node:fs/promises";
 import * as os from "node:os";
@@ -328,7 +328,7 @@ if (cluster.isWorker) {
 
 	async function readDids(): Promise<Array<[string, string]>> {
 		try {
-			return unpack(await fs.readFile("dids.cache"), { lazy: true });
+			return unpackMultiple(await fs.readFile("dids.cache"));
 		} catch (err: any) {
 			console.error("Make sure you ran the fetch-dids script first", err);
 			process.exit(1);
