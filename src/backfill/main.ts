@@ -135,7 +135,7 @@ if (cluster.isWorker) {
 		worker.on("error", (err) => {
 			console.error(`Write collection worker error: ${err}`);
 			worker.kill();
-			cluster.fork();
+			cluster.fork({ WORKER_KIND: "writeCollection", WORKER_INDEX: `${i}` });
 		});
 	};
 	for (let i = 0; i < 3; i++) {
@@ -150,7 +150,7 @@ if (cluster.isWorker) {
 		worker.on("error", (err) => {
 			console.error(`Write record worker error: ${err}`);
 			worker.kill();
-			cluster.fork();
+			cluster.fork({ WORKER_KIND: "writeRecord" });
 		});
 
 		const worker2 = cluster.fork({ WORKER_KIND: "writeRecord" });
@@ -160,7 +160,7 @@ if (cluster.isWorker) {
 		worker2.on("error", (err) => {
 			console.error(`Write record worker error: ${err}`);
 			worker2.kill();
-			cluster.fork();
+			cluster.fork({ WORKER_KIND: "writeRecord" });
 		});
 	};
 
@@ -176,7 +176,7 @@ if (cluster.isWorker) {
 		worker.on("error", (err) => {
 			console.error(`Repo worker error: ${err}`);
 			worker.kill();
-			cluster.fork();
+			cluster.fork({ WORKER_KIND: "repo", REPOS_DIR });
 		});
 	};
 
@@ -199,7 +199,7 @@ if (cluster.isWorker) {
 		} else if (pid in workers.repo) {
 			spawnRepoWorker();
 		} else {
-			throw new Error(`Unknown worker kind: ${pid}`);
+			console.error(`Unknown worker kind: ${pid}`);
 		}
 	});
 
