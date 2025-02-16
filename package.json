@@ -9,7 +9,8 @@
 		"request-crawl": "bun run src/requestCrawlPdses.ts",
 		"index-repos": "bun run src/indexRepos.ts",
 		"create-indexes": "bun run src/createIndexes.ts",
-		"drop-indexes": "bun run src/dropIndexes.ts"
+		"drop-indexes": "bun run src/dropIndexes.ts",
+		"fetch-dids": "bun run src/fetchDids.ts"
 	},
 	"keywords": [],
 	"author": "",

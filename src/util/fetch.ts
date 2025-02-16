@@ -1,4 +1,3 @@
-import LargeMap from "large-map";
 import { errors, type Headers } from "undici";
 
 export async function fetchPdses(): Promise<Array<string>> {
@@ -12,17 +11,16 @@ export async function fetchPdses(): Promise<Array<string>> {
 	return pdses;
 }
 
-export async function fetchAllDids(): Promise<Array<[string, string]>> {
+export async function fetchAllDids(onDid: (did: string, pds: string) => void) {
 	console.log("Fetching DIDs");
 	const pdses = await fetchPdses();
-	const dids = new LargeMap<string, string>(5_000_000);
-	await Promise.all(pdses.map((pds) => fetchPdsDids(pds, dids)));
-	console.log(`Fetched ${dids.size} DIDs`);
-
-	return Array.from(dids.entries());
+	let count = 0;
+	await Promise.all(pdses.map((pds) => fetchPdsDids(pds, onDid).then((c) => (count += c))));
+	console.log(`Fetched ${count} DIDs`);
+	return count;
 }
 
-async function fetchPdsDids(pds: string, map: LargeMap<string, string>) {
+async function fetchPdsDids(pds: string, onDid: (did: string, pds: string) => void) {
 	const url = new URL(`/xrpc/com.atproto.sync.listRepos`, pds).href;
 	let cursor = "";
 	let fetched = 0;
@@ -44,7 +42,8 @@ async function fetchPdsDids(pds: string, map: LargeMap<string, string>) {
 				repos: Array<{ did: string }>;
 			};
 			for (const repo of repos) {
-				map.set(repo.did, pds);
+				if (!repo.did) continue;
+				onDid(repo.did, pds);
 				fetched++;
 			}
 
@@ -82,6 +81,7 @@ async function fetchPdsDids(pds: string, map: LargeMap<string, string>) {
 		}
 	}
 	console.log(`Fetched ${fetched} DIDs from ${pds}`);
+	return fetched;
 }
 
 export async function getRepo(did: string, pds: string, attempt = 0): Promise<Uint8Array | null> {

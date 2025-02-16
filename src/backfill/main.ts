@@ -10,14 +10,14 @@ import * as bsky from "@futuristick/atproto-bsky";
 import { createClient } from "@redis/client";
 import Queue from "bee-queue";
 import CacheableLookup from "cacheable-lookup";
-import { pack, unpack } from "msgpackr";
+import { unpack } from "msgpackr";
 import cluster from "node:cluster";
 import fs from "node:fs/promises";
 import * as os from "node:os";
 import path from "node:path";
 import PQueue from "p-queue";
 import { Agent, RetryAgent, setGlobalDispatcher } from "undici";
-import { fetchAllDids, sleep } from "../util/fetch.js";
+import { sleep } from "../util/fetch.js";
 import { type CommitMessage, repoWorker } from "./workers/repo.js";
 import { writeCollectionWorker, writeWorkerAllocations } from "./workers/writeCollection.js";
 import { writeRecordWorker } from "./workers/writeRecord";
@@ -244,7 +244,7 @@ if (cluster.isWorker) {
 
 	async function main() {
 		console.log("Reading DIDs");
-		const repos = await readOrFetchDids();
+		const repos = await readDids();
 		console.log(`Filtering out seen DIDs from ${repos.length} total`);
 
 		const seenDids = new Set(await redis.sMembers("backfill:seen"));
@@ -326,18 +326,13 @@ if (cluster.isWorker) {
 		}
 	}
 
-	async function readOrFetchDids(): Promise<Array<[string, string]>> {
+	async function readDids(): Promise<Array<[string, string]>> {
 		try {
 			return unpack(await fs.readFile("dids.cache"), { lazy: true });
 		} catch (err: any) {
-			const dids = await fetchAllDids();
-			await writeDids(dids);
-			return dids;
+			console.error("Make sure you ran the fetch-dids script first");
+			process.exit(1);
 		}
-	}
-
-	function writeDids(dids: Array<[string, string]>) {
-		return fs.writeFile("dids.cache", pack(dids));
 	}
 
 	const backoffs = [1_000, 5_000, 15_000, 30_000, 60_000, 120_000, 300_000];
