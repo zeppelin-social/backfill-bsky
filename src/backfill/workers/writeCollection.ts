@@ -66,7 +66,10 @@ export async function writeCollectionWorker() {
 	process.on("message", async (msg: CommitMessage) => {
 		if (msg.type !== "commit") throw new Error(`Invalid message type ${msg.type}`);
 
-		if (!queues[msg.collection]) return;
+		if (!queues[msg.collection]) {
+			console.warn(`Received commit for unknown collection ${msg.collection}`);
+			return;
+		}
 
 		for (const commit of msg.commits) {
 			const { uri, cid, timestamp, obj } = commit;
@@ -97,20 +100,23 @@ export async function writeCollectionWorker() {
 	});
 
 	async function processQueue() {
+		queueTimer = setTimeout(processQueue, 1000);
+
+		let recordCount = 0;
 		const records = new Map<string, ToInsertCommit[]>();
-		for (const collection of collections) {
+
+		for (const collection in queues) {
 			if (queues[collection].length > 0) {
+				recordCount += queues[collection].length;
 				records.set(collection, queues[collection]);
 				queues[collection] = [];
 			}
 		}
 
-		queueTimer = setTimeout(processQueue, 1000);
-
-		const time = `Writing ${records.size} records by collection for ${collections.join(", ")}`;
+		const time = `Writing ${recordCount} records by collection for ${collections.join(", ")}`;
 
 		try {
-			if (records.size > 0) {
+			if (recordCount > 0) {
 				console.time(time);
 				await indexingSvc.bulkIndexToCollectionSpecificTables(records);
 				console.timeEnd(time);

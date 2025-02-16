@@ -211,7 +211,10 @@ if (cluster.isWorker) {
 
 		const writeCollectionWorkerId = collectionToWriteWorkerId.get(message.collection);
 		// Repos can contain non-Bluesky records, just ignore them
-		if (writeCollectionWorkerId === undefined) return;
+		if (writeCollectionWorkerId === undefined) {
+			console.warn(`Received commit for unknown collection ${message.collection}`);
+			return;
+		}
 
 		const writeCollectionWorker = cluster.workers?.[writeCollectionWorkerId];
 		const writeRecordWorker = Math.random() < 0.5
