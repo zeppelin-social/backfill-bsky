@@ -51,7 +51,7 @@ setGlobalDispatcher(
 				lookup: (hostname, { family: _family, hints, all, ..._options }, callback) => {
 					const family = !_family
 						? undefined
-						: (_family === 6 || _family === "IPv6")
+						: _family === 6 || _family === "IPv6"
 						? 6
 						: 4;
 					return cacheable.lookup(hostname, {
@@ -256,10 +256,9 @@ if (cluster.isWorker) {
 		for (const [did, pds] of repos) {
 			// dumb pds doesn't implement getRepo
 			if (pds.includes("blueski.social")) continue;
-			// This may be faster as a single set difference?
 			if (seenDids.has(did)) continue;
-			// Wait for queue to be below 1000 before adding another job
-			await fetchQueue.onSizeLessThan(1000);
+			// Wait for global queue to be below 500 before adding another job
+			await fetchQueue.onSizeLessThan(500);
 			void fetchQueue.add(() => queueRepo(pds, did)).catch((e) =>
 				console.error(`Error queuing repo for ${did} `, e)
 			);
@@ -303,22 +302,33 @@ if (cluster.isWorker) {
 		}
 	}
 
+	const pdsQueues = new Map<string, PQueue>();
+
 	async function queueRepo(pds: string, did: string) {
+		let pdsQueue = pdsQueues.get(pds);
+		if (!pdsQueue) {
+			pdsQueue = new PQueue({ concurrency: 10 });
+			pdsQueues.set(pds, pdsQueue);
+		}
+
 		console.time(`Fetching repo: ${did}`);
 		try {
-			const rpc = new WrappedRPC(pds);
-			const { data: repo } = await rpc.get("com.atproto.sync.getRepo", {
-				params: { did: did as `did:${string}` },
+			await pdsQueue.add(async () => {
+				const rpc = new WrappedRPC(pds);
+				const { data: repo } = await rpc.get("com.atproto.sync.getRepo", {
+					params: { did: did as `did:${string}` },
+				});
+				if (repo?.length) {
+					await Bun.write(path.join(REPOS_DIR, did), repo);
+					await queue.createJob({ did }).setId(did).save();
+				}
 			});
-			if (repo?.length) {
-				await Bun.write(path.join(REPOS_DIR, did), repo);
-				await queue.createJob({ did }).setId(did).save();
-			}
 		} catch (err) {
 			console.error(`Error fetching repo for ${did} --- ${err}`);
 			if (err instanceof XRPCError) {
 				if (
-					err.name === "RepoDeactivated" || err.name === "RepoTakendown"
+					err.name === "RepoDeactivated"
+					|| err.name === "RepoTakendown"
 					|| err.name === "RepoNotFound"
 				) {
 					await redis.sAdd("backfill:seen", did);
