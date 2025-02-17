@@ -9,6 +9,7 @@ import {
 import * as bsky from "@futuristick/atproto-bsky";
 import { createClient } from "@redis/client";
 import Queue from "bee-queue";
+import { generateHeapSnapshot } from "bun";
 import CacheableLookup from "cacheable-lookup";
 import { unpackMultiple } from "msgpackr";
 import cluster from "node:cluster";
@@ -242,7 +243,7 @@ if (cluster.isWorker) {
 		console.log(`Exiting with code ${code}`);
 	});
 
-	const fetchQueue = new PQueue({ concurrency: 10_000 });
+	const fetchQueue = new PQueue({ concurrency: 1_000 });
 
 	async function main() {
 		console.log("Reading DIDs");
@@ -309,6 +310,7 @@ if (cluster.isWorker) {
 			pdsQueues.set(pds, pdsQueue);
 		}
 
+		await pdsQueue.onSizeLessThan(300);
 		await pdsQueue.add(async () => {
 			console.time(`Fetching repo: ${did}`);
 			try {
