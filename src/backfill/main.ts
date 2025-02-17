@@ -242,8 +242,7 @@ if (cluster.isWorker) {
 		console.log(`Exiting with code ${code}`);
 	});
 
-	// Aim to be fetching ~100 repos at a time
-	const fetchQueue = new PQueue({ concurrency: 100 });
+	const fetchQueue = new PQueue();
 
 	async function main() {
 		console.log("Reading DIDs");
@@ -257,8 +256,8 @@ if (cluster.isWorker) {
 			// dumb pds doesn't implement getRepo
 			if (pds.includes("blueski.social")) continue;
 			if (seenDids.has(did)) continue;
-			// Wait for global queue to be below 500 before adding another job
-			await fetchQueue.onSizeLessThan(500);
+			// Limit global queue to 10k repos
+			await fetchQueue.onSizeLessThan(10_000);
 			void fetchQueue.add(() => queueRepo(pds, did)).catch((e) =>
 				console.error(`Error queuing repo for ${did} `, e)
 			);
