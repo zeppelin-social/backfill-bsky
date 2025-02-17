@@ -38,7 +38,7 @@ class ToBufferSubscription extends FirehoseSubscription {
 	constructor(filename: string, opts: Omit<FirehoseSubscriptionOptions, "dbOptions">) {
 		super({ ...opts, minWorkers: 0, maxWorkers: 0, dbOptions: { url: "" } });
 
-		this.stream = fs.createWriteStream(filename);
+		this.stream = fs.createWriteStream(filename, { flags: "a" });
 		// @ts-expect-error
 		this.workers = [new FakeWorker(this.stream)];
 
@@ -53,6 +53,7 @@ function main() {
 
 	const sub = new ToBufferSubscription(filename, {
 		service: process.env.BUFFER_REPO_PROVIDER,
+		cursor: 0,
 		onError: (err) => console.error(...(err.cause ? [err.message, err.cause] : [err])),
 	});
 
