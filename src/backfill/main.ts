@@ -321,15 +321,15 @@ if (cluster.isWorker) {
 					await queue.createJob({ did }).setId(did).save();
 				}
 			} catch (err) {
-				console.error(`Error fetching repo for ${did} --- ${err}`);
-				if (err instanceof XRPCError) {
-					if (
-						err.name === "RepoDeactivated"
-						|| err.name === "RepoTakendown"
-						|| err.name === "RepoNotFound"
-					) {
-						await redis.sAdd("backfill:seen", did);
-					}
+				if (
+					["RepoDeactivated", "RepoTakendown", "RepoNotFound"].some((s) =>
+						`${err}`.includes(s)
+					)
+				) {
+					await redis.sAdd("backfill:seen", did);
+					console.error(`Marking ${did} as seen --- ${err}`);
+				} else {
+					console.error(`Error fetching repo for ${did} --- ${err}`);
 				}
 			} finally {
 				console.timeEnd(`Fetching repo: ${did}`);
