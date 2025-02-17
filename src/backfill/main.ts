@@ -258,8 +258,8 @@ if (cluster.isWorker) {
 			if (pds.includes("blueski.social")) continue;
 			// This may be faster as a single set difference?
 			if (seenDids.has(did)) continue;
-			// Wait for queue to be below 250 before adding another job
-			await fetchQueue.onSizeLessThan(250);
+			// Wait for queue to be below 1000 before adding another job
+			await fetchQueue.onSizeLessThan(1000);
 			void fetchQueue.add(() => queueRepo(pds, did)).catch((e) =>
 				console.error(`Error queuing repo for ${did} `, e)
 			);
