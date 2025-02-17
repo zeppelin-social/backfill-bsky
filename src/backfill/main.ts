@@ -256,8 +256,6 @@ if (cluster.isWorker) {
 			// dumb pds doesn't implement getRepo
 			if (pds.includes("blueski.social")) continue;
 			if (seenDids.has(did)) continue;
-			// Limit global queue to 10k repos
-			await fetchQueue.onSizeLessThan(10_000);
 			void fetchQueue.add(() => queueRepo(pds, did)).catch((e) =>
 				console.error(`Error queuing repo for ${did} `, e)
 			);
@@ -310,9 +308,9 @@ if (cluster.isWorker) {
 			pdsQueues.set(pds, pdsQueue);
 		}
 
-		console.time(`Fetching repo: ${did}`);
-		try {
-			await pdsQueue.add(async () => {
+		await pdsQueue.add(async () => {
+			console.time(`Fetching repo: ${did}`);
+			try {
 				const rpc = new WrappedRPC(pds);
 				const { data: repo } = await rpc.get("com.atproto.sync.getRepo", {
 					params: { did: did as `did:${string}` },
@@ -321,21 +319,21 @@ if (cluster.isWorker) {
 					await Bun.write(path.join(REPOS_DIR, did), repo);
 					await queue.createJob({ did }).setId(did).save();
 				}
-			});
-		} catch (err) {
-			console.error(`Error fetching repo for ${did} --- ${err}`);
-			if (err instanceof XRPCError) {
-				if (
-					err.name === "RepoDeactivated"
-					|| err.name === "RepoTakendown"
-					|| err.name === "RepoNotFound"
-				) {
-					await redis.sAdd("backfill:seen", did);
+			} catch (err) {
+				console.error(`Error fetching repo for ${did} --- ${err}`);
+				if (err instanceof XRPCError) {
+					if (
+						err.name === "RepoDeactivated"
+						|| err.name === "RepoTakendown"
+						|| err.name === "RepoNotFound"
+					) {
+						await redis.sAdd("backfill:seen", did);
+					}
 				}
+			} finally {
+				console.timeEnd(`Fetching repo: ${did}`);
 			}
-		} finally {
-			console.timeEnd(`Fetching repo: ${did}`);
-		}
+		});
 	}
 
 	async function readDids(): Promise<Array<[string, string]>> {
