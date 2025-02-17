@@ -242,7 +242,7 @@ if (cluster.isWorker) {
 		console.log(`Exiting with code ${code}`);
 	});
 
-	const fetchQueue = new PQueue();
+	const fetchQueue = new PQueue({ concurrency: 10_000 });
 
 	async function main() {
 		console.log("Reading DIDs");
@@ -256,6 +256,7 @@ if (cluster.isWorker) {
 			// dumb pds doesn't implement getRepo
 			if (pds.includes("blueski.social")) continue;
 			if (seenDids.has(did)) continue;
+			await fetchQueue.onSizeLessThan(20_000);
 			void fetchQueue.add(() => queueRepo(pds, did)).catch((e) =>
 				console.error(`Error queuing repo for ${did} `, e)
 			);
