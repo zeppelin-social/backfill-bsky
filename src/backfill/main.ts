@@ -362,7 +362,6 @@ if (cluster.isWorker) {
 			pdsQueues.set(pds, pdsQueue);
 		}
 
-		await pdsQueue.onSizeLessThan(300);
 		await pdsQueue.add(async () => {
 			console.time(`Fetching repo: ${did}`);
 			try {
