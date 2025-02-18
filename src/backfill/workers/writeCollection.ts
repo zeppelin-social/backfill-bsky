@@ -52,7 +52,6 @@ export async function writeCollectionWorker() {
 	const indexingSvc = new IndexingService(db, idResolver, new BackgroundQueue(db));
 
 	const queues: Record<string, ToInsertCommit[]> = {};
-	{}
 
 	for (const collection of collections) {
 		if (!indexingSvc.findIndexerForCollection(collection)) {
@@ -63,8 +62,23 @@ export async function writeCollectionWorker() {
 
 	let queueTimer = setTimeout(processQueue, 1000);
 
-	process.on("message", async (msg: CommitMessage) => {
-		if (msg.type !== "commit") throw new Error(`Invalid message type ${msg.type}`);
+	let isShuttingDown = false;
+
+	process.on("message", async (msg: CommitMessage | { type: "shutdown" }) => {
+		if (msg.type === "shutdown") {
+			console.log(`Write collection worker ${workerIndex} received shutdown signal`);
+			isShuttingDown = true;
+			// Process remaining queue then exit
+			await processQueue();
+			process.send?.({ type: "shutdownComplete" });
+			process.exit(0);
+		}
+
+		if (isShuttingDown) return; // Don't accept new messages during shutdown
+
+		if (msg.type !== "commit") {
+			throw new Error(`Invalid message type ${msg}`);
+		}
 
 		if (!queues[msg.collection]) {
 			console.warn(`Received commit for unknown collection ${msg.collection}`);
@@ -100,7 +114,9 @@ export async function writeCollectionWorker() {
 	});
 
 	async function processQueue() {
-		queueTimer = setTimeout(processQueue, 1000);
+		if (!isShuttingDown) {
+			queueTimer = setTimeout(processQueue, 1000);
+		}
 
 		let recordCount = 0;
 		const records = new Map<string, ToInsertCommit[]>();

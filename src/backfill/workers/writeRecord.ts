@@ -27,8 +27,23 @@ export async function writeRecordWorker() {
 
 	let queueTimer = setTimeout(processQueue, 500);
 
-	process.on("message", async (msg: CommitMessage) => {
-		if (msg.type !== "commit") throw new Error(`Invalid message type ${msg.type}`);
+	let isShuttingDown = false;
+
+	process.on("message", async (msg: CommitMessage | { type: "shutdown" }) => {
+		if (msg.type === "shutdown") {
+			console.log("Write record worker received shutdown signal");
+			isShuttingDown = true;
+			// Process remaining queue then exit
+			await processQueue();
+			process.send?.({ type: "shutdownComplete" });
+			process.exit(0);
+		}
+
+		if (isShuttingDown) return; // Don't accept new messages during shutdown
+
+		if (msg.type !== "commit") {
+			throw new Error(`Invalid message type ${msg}`);
+		}
 
 		for (const commit of msg.commits) {
 			const { uri, cid, timestamp, obj } = commit;
@@ -54,12 +69,14 @@ export async function writeRecordWorker() {
 	});
 
 	async function processQueue() {
+		if (!isShuttingDown) {
+			queueTimer = setTimeout(processQueue, 500);
+		}
+
 		const time = `Writing records: ${queue.length}`;
 
 		const records = [...queue];
 		queue = [];
-
-		queueTimer = setTimeout(processQueue, 500);
 
 		try {
 			if (records.length > 0) {

@@ -9,7 +9,6 @@ import {
 import * as bsky from "@futuristick/atproto-bsky";
 import { createClient } from "@redis/client";
 import Queue from "bee-queue";
-import { generateHeapSnapshot } from "bun";
 import CacheableLookup from "cacheable-lookup";
 import { unpackMultiple } from "msgpackr";
 import cluster from "node:cluster";
@@ -245,6 +244,58 @@ if (cluster.isWorker) {
 
 	const fetchQueue = new PQueue({ concurrency: 1_000 });
 
+	let isShuttingDown = false;
+
+	process.on("SIGINT", async () => {
+		console.log("\nReceived SIGINT. Starting graceful shutdown...");
+		isShuttingDown = true;
+
+		// Stop accepting new repos
+		fetchQueue.pause();
+		pdsQueues.forEach((queue) => queue.pause());
+
+		// Track which workers have completed
+		const completedWorkers = new Set<number>();
+
+		// Set up completion message handler
+		cluster.on("message", (worker, msg: { type?: string }) => {
+			if (msg.type === "shutdownComplete") {
+				console.log(`Worker ${worker.id} completed shutdown`);
+				completedWorkers.add(worker.id);
+			}
+		});
+
+		const writeWorkerIds = [
+			...new Set(collectionToWriteWorkerId.values()),
+			workers.writeRecord.id,
+			workers.writeRecord2.id,
+		];
+
+		console.log("Waiting for write workers to finish...");
+
+		for (const workerId of writeWorkerIds) {
+			const worker = cluster.workers?.[workerId];
+			if (!worker) continue;
+			worker.send({ type: "shutdown" });
+		}
+
+		// Wait for all workers to report completion or timeout
+		const timeoutPromise = new Promise((resolve) => setTimeout(resolve, 60_000));
+		const completionPromise = new Promise((resolve) => {
+			const checkInterval = setInterval(() => {
+				if (writeWorkerIds.every((id) => completedWorkers.has(id))) {
+					clearInterval(checkInterval);
+					resolve(true);
+				}
+			}, 100);
+		});
+
+		await Promise.race([timeoutPromise, completionPromise]);
+
+		console.log("Shutting down...");
+		process.exit(0);
+	});
+
 	async function main() {
 		console.log("Reading DIDs");
 		const repos = await readDids();
@@ -254,6 +305,7 @@ if (cluster.isWorker) {
 		console.log(`Seen: ${seenDids.size} DIDs`);
 
 		for (const [did, pds] of repos) {
+			if (isShuttingDown) break;
 			// dumb pds doesn't implement getRepo
 			if (pds.includes("blueski.social")) continue;
 			if (seenDids.has(did)) continue;
