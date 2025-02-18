@@ -66,15 +66,11 @@ export async function writeCollectionWorker() {
 
 	process.on("message", async (msg: CommitMessage | { type: "shutdown" }) => {
 		if (msg.type === "shutdown") {
-			console.log(`Write collection worker ${workerIndex} received shutdown signal`);
-			isShuttingDown = true;
-			// Process remaining queue then exit
-			await processQueue();
-			process.send?.({ type: "shutdownComplete" });
-			process.exit(0);
+			await handleShutdown();
+			return;
 		}
 
-		if (isShuttingDown) return; // Don't accept new messages during shutdown
+		if (isShuttingDown) return;
 
 		if (msg.type !== "commit") {
 			throw new Error(`Invalid message type ${msg}`);
@@ -113,6 +109,9 @@ export async function writeCollectionWorker() {
 		console.error(`Uncaught exception in worker ${workerIndex}`, err);
 	});
 
+	process.on("SIGTERM", handleShutdown);
+	process.on("SIGINT", handleShutdown);
+
 	async function processQueue() {
 		if (!isShuttingDown) {
 			queueTimer = setTimeout(processQueue, 1000);
@@ -141,6 +140,14 @@ export async function writeCollectionWorker() {
 			console.error(`Error processing queue for ${collections.join(", ")}`, err);
 			console.timeEnd(time);
 		}
+	}
+
+	async function handleShutdown() {
+		console.log(`Write collection worker ${workerIndex} received shutdown signal`);
+		isShuttingDown = true;
+		await processQueue();
+		process.send?.({ type: "shutdownComplete" });
+		process.exit(0);
 	}
 }
 

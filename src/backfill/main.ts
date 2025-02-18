@@ -11,7 +11,7 @@ import { createClient } from "@redis/client";
 import Queue from "bee-queue";
 import CacheableLookup from "cacheable-lookup";
 import { unpackMultiple } from "msgpackr";
-import cluster from "node:cluster";
+import cluster, { type Worker } from "node:cluster";
 import fs from "node:fs/promises";
 import * as os from "node:os";
 import path from "node:path";
@@ -22,7 +22,7 @@ import { type CommitMessage, repoWorker } from "./workers/repo.js";
 import { writeCollectionWorker, writeWorkerAllocations } from "./workers/writeCollection.js";
 import { writeRecordWorker } from "./workers/writeRecord";
 
-type WorkerMessage = CommitMessage;
+type WorkerMessage = CommitMessage | { type: "shutdownComplete" };
 
 declare global {
 	namespace NodeJS {
@@ -185,25 +185,17 @@ if (cluster.isWorker) {
 		spawnRepoWorker();
 	}
 
-	cluster.on("exit", ({ process: { pid } }, code, signal) => {
-		console.warn(`Worker ${pid} exited with code ${code} and signal ${signal}`);
-		if (!pid) return;
-		if (pid in workers.writeCollection) {
-			spawnWriteCollectionWorker(workers.writeCollection[pid].index);
-		} else if (pid === workers.writeRecord.pid) {
-			cluster.workers?.[workers.writeRecord.id]?.kill();
-			spawnWriteRecordWorker();
-		} else if (pid === workers.writeRecord2.pid) {
-			cluster.workers?.[workers.writeRecord2.id]?.kill();
-			spawnWriteRecordWorker();
-		} else if (pid in workers.repo) {
-			spawnRepoWorker();
-		} else {
-			console.error(`Unknown worker kind: ${pid}`);
-		}
-	});
+	let isShuttingDown = false;
 
-	cluster.on("message", (_, message: WorkerMessage) => {
+	cluster.on("exit", handleWorkerExit);
+
+	cluster.on("message", (worker, message: WorkerMessage) => {
+		if (message.type === "shutdownComplete" && !isShuttingDown) {
+			handleWorkerExit(worker, 0, "SIGINT");
+			if (!worker.process.killed) worker.kill();
+			return;
+		}
+
 		if (message?.type !== "commit" || !message.collection || !message.commits) {
 			throw new Error(`Received invalid worker message: ${JSON.stringify(message)}`);
 		}
@@ -243,8 +235,6 @@ if (cluster.isWorker) {
 	});
 
 	const fetchQueue = new PQueue({ concurrency: 1_000 });
-
-	let isShuttingDown = false;
 
 	process.on("SIGINT", async () => {
 		console.log("\nReceived SIGINT. Starting graceful shutdown...");
@@ -438,6 +428,24 @@ if (cluster.isWorker) {
 					await onRatelimit(waitTime);
 				}
 			}
+		}
+	}
+
+	function handleWorkerExit({ process: { pid } }: Worker, code: number, signal: string) {
+		console.warn(`Worker ${pid} exited with code ${code} and signal ${signal}`);
+		if (!pid) return;
+		if (pid in workers.writeCollection) {
+			spawnWriteCollectionWorker(workers.writeCollection[pid].index);
+		} else if (pid === workers.writeRecord.pid) {
+			cluster.workers?.[workers.writeRecord.id]?.kill();
+			spawnWriteRecordWorker();
+		} else if (pid === workers.writeRecord2.pid) {
+			cluster.workers?.[workers.writeRecord2.id]?.kill();
+			spawnWriteRecordWorker();
+		} else if (pid in workers.repo) {
+			spawnRepoWorker();
+		} else {
+			console.error(`Unknown worker kind: ${pid}`);
 		}
 	}
 }

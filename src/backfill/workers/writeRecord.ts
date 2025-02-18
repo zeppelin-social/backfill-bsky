@@ -31,12 +31,8 @@ export async function writeRecordWorker() {
 
 	process.on("message", async (msg: CommitMessage | { type: "shutdown" }) => {
 		if (msg.type === "shutdown") {
-			console.log("Write record worker received shutdown signal");
-			isShuttingDown = true;
-			// Process remaining queue then exit
-			await processQueue();
-			process.send?.({ type: "shutdownComplete" });
-			process.exit(0);
+			await handleShutdown();
+			return;
 		}
 
 		if (isShuttingDown) return; // Don't accept new messages during shutdown
@@ -68,6 +64,9 @@ export async function writeRecordWorker() {
 		console.error(`Uncaught exception in write record worker`, err);
 	});
 
+	process.on("SIGTERM", handleShutdown);
+	process.on("SIGINT", handleShutdown);
+
 	async function processQueue() {
 		if (!isShuttingDown) {
 			queueTimer = setTimeout(processQueue, 500);
@@ -88,5 +87,13 @@ export async function writeRecordWorker() {
 			console.error(`Error processing queue`, err);
 			console.timeEnd(time);
 		}
+	}
+
+	async function handleShutdown() {
+		console.log("Write record worker received shutdown signal");
+		isShuttingDown = true;
+		await processQueue();
+		process.send?.({ type: "shutdownComplete" });
+		process.exit(0);
 	}
 }
