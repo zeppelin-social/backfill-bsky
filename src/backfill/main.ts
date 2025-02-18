@@ -306,7 +306,7 @@ if (cluster.isWorker) {
 		fetchedOverInterval = 0;
 
 		console.log(
-			`Processed DIDs: ${processed.toFixed(1)}/s | Fetched repos: ${fetched.toFixed(1)}/s`,
+			`Processed repos: ${processed.toFixed(1)}/s | Fetched repos: ${fetched.toFixed(1)}/s`,
 			`\n`,
 			`Fetch queue: ${fetchQueue.size} DIDs | ${fetchQueue.pending} pending`,
 		);
@@ -326,7 +326,7 @@ if (cluster.isWorker) {
 			// dumb pds doesn't implement getRepo
 			if (pds.includes("blueski.social")) continue;
 			if (seenDids.has(did)) continue;
-			await fetchQueue.onSizeLessThan(20_000);
+			await fetchQueue.onSizeLessThan(10_000);
 			void fetchQueue.add(() => queueRepo(pds, did)).catch((e) =>
 				console.error(`Error queuing repo for ${did} `, e)
 			);
@@ -375,7 +375,7 @@ if (cluster.isWorker) {
 	async function queueRepo(pds: string, did: string) {
 		let pdsQueue = pdsQueues.get(pds);
 		if (!pdsQueue) {
-			pdsQueue = new PQueue({ concurrency: 10 });
+			pdsQueue = new PQueue({ concurrency: 15 });
 			pdsQueues.set(pds, pdsQueue);
 		}
 
