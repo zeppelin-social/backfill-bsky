@@ -296,6 +296,22 @@ if (cluster.isWorker) {
 		process.exit(0);
 	});
 
+	let totalProcessed = 0, fetchedOverInterval = 0;
+
+	setInterval(async () => {
+		const newTotalProcessed = await redis.sCard("backfill:seen");
+
+		const processed = (newTotalProcessed - totalProcessed) / 5,
+			fetched = fetchedOverInterval / 5;
+		fetchedOverInterval = 0;
+
+		console.log(
+			`Processed DIDs: ${processed.toFixed(1)}/s | Fetched repos: ${fetched.toFixed(1)}/s`,
+			`\n`,
+			`Fetch queue: ${fetchQueue.size} DIDs | ${fetchQueue.pending} pending`,
+		);
+	}, 5_000);
+
 	async function main() {
 		console.log("Reading DIDs");
 		const repos = await readDids();
@@ -303,6 +319,7 @@ if (cluster.isWorker) {
 
 		const seenDids = new Set(await redis.sMembers("backfill:seen"));
 		console.log(`Seen: ${seenDids.size} DIDs`);
+		totalProcessed = seenDids.size;
 
 		for (const [did, pds] of repos) {
 			if (isShuttingDown) break;
@@ -363,7 +380,6 @@ if (cluster.isWorker) {
 		}
 
 		await pdsQueue.add(async () => {
-			console.time(`Fetching repo: ${did}`);
 			try {
 				const rpc = new WrappedRPC(pds);
 				const { data: repo } = await rpc.get("com.atproto.sync.getRepo", {
@@ -372,6 +388,7 @@ if (cluster.isWorker) {
 				if (repo?.length) {
 					await Bun.write(path.join(REPOS_DIR, did), repo);
 					await queue.createJob({ did }).setId(did).save();
+					fetchedOverInterval++;
 				}
 			} catch (err) {
 				if (
@@ -384,8 +401,6 @@ if (cluster.isWorker) {
 				} else {
 					console.error(`Error fetching repo for ${did} --- ${err}`);
 				}
-			} finally {
-				console.timeEnd(`Fetching repo: ${did}`);
 			}
 		});
 	}

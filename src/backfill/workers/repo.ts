@@ -43,8 +43,6 @@ export async function repoWorker() {
 		}
 
 		try {
-			console.time(`Processing repo: ${did}`);
-
 			const now = Date.now();
 			for await (const { record, rkey, collection, cid } of iterateAtpRepo(repo)) {
 				const uri = `at://${did}/${collection}/${rkey}`;
@@ -75,7 +73,6 @@ export async function repoWorker() {
 				(commitData[collection] ??= []).push(data);
 			}
 			await redis.sAdd("backfill:seen", did);
-			console.timeEnd(`Processing repo: ${did}`);
 		} catch (err) {
 			console.warn(`iterateAtpRepo error for did ${did} --- ${err}`);
 		} finally {
