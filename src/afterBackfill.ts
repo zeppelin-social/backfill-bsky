@@ -499,6 +499,11 @@ interface State {
 }
 
 function loadState(): State {
+	if (!fs.existsSync(statePath)) {
+		state = { postIndex: 0, profileIndex: 0, validationIndex: 0 };
+		saveState((s) => s);
+		return state;
+	}
 	return state = JSON.parse(fs.readFileSync(statePath, "utf-8"));
 }
 
