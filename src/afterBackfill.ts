@@ -18,6 +18,8 @@ import type { Record as GateRecord } from "@futuristick/atproto-bsky/dist/lexico
 import { postUriToThreadgateUri, uriToDid } from "@futuristick/atproto-bsky/dist/util/uris";
 import { parsePostgate } from "@futuristick/atproto-bsky/dist/views/util";
 import { sql } from "kysely";
+import fs from "node:fs";
+import path from "node:path";
 
 declare global {
 	namespace NodeJS {
@@ -38,12 +40,17 @@ const POOL_SIZE = 500;
 const DB_SETTINGS = { max_parallel_workers: 24, maintenance_work_mem: "\"72GB\"" };
 
 async function main() {
-	const [postOffset, profileOffset, validationOffset] = process.argv.slice(2).map((arg) => {
+	let [postOffset, profileOffset, validationOffset] = process.argv.slice(2).map((arg) => {
 		if (!arg) return undefined;
 		const num = parseInt(arg);
 		if (isNaN(num)) throw new Error(`Invalid offset: ${arg}`);
 		return num;
 	});
+
+	const state = loadState();
+	postOffset ??= state.postIndex;
+	profileOffset ??= state.profileIndex;
+	validationOffset ??= state.validationIndex;
 
 	const db = new Database({
 		url: process.env.BSKY_DB_POSTGRES_URL,
@@ -68,51 +75,67 @@ void main();
 
 async function backfillPostAggregates({ db }: Database, offset?: number | undefined) {
 	const limit = 10_000;
-	const rowCount = await fastRowCount(db, "post");
+	let rowCount = await fastRowCount(db, "post");
 	console.log(`post row count: ${rowCount}`);
 
-	const batches = Math.ceil(rowCount / limit);
+	let batches = Math.ceil(rowCount / limit);
 	let i = offset ?? 0;
 	try {
-		for (; i < batches; i++) {
+		while (true) {
+			if (i >= batches) {
+				rowCount = await fastRowCount(db, "post");
+				batches = Math.ceil(rowCount / limit);
+			}
+
+			saveState((s) => ({ ...s, postIndex: i }));
 			const offset = i * limit;
+
 			console.time(`backfilling posts ${i + 1}/${batches}`);
-			await sql`
-			WITH uris (uri) AS (
-			  SELECT uri FROM post WHERE uri IS NOT NULL ORDER BY "uri" ASC LIMIT ${limit} OFFSET ${offset}
-			)
-			INSERT INTO post_agg ("uri", "replyCount", "likeCount", "repostCount")
-			SELECT
-			  v.uri,
-			  COALESCE(replies.count, 0) as "replyCount",
-			  COALESCE(likes.count, 0) as "likeCount",
-			  COALESCE(reposts.count, 0) as "repostCount"
-			FROM uris v
-			LEFT JOIN (
-			  SELECT "replyParent" as uri, COUNT(*) as count
-			  FROM post
-			  WHERE "replyParent" IN (SELECT uri FROM uris)
-			    AND (post."violatesThreadGate" IS NULL OR post."violatesThreadGate" = false)
-			  GROUP BY "replyParent"
-			) replies ON replies.uri = v.uri
-			LEFT JOIN (
-			  SELECT subject as uri, COUNT(*) as count
-			  FROM "like"
-			  WHERE subject IN (SELECT uri FROM uris)
-			  GROUP BY subject
-			) likes ON likes.uri = v.uri
-			LEFT JOIN (
-			  SELECT subject as uri, COUNT(*) as count
-			  FROM repost
-			  WHERE subject IN (SELECT uri FROM uris)
-			  GROUP BY subject
-			) reposts ON reposts.uri = v.uri
-			ON CONFLICT (uri) DO UPDATE
-			SET "replyCount" = excluded."replyCount",
-			    "likeCount" = excluded."likeCount",
-			    "repostCount" = excluded."repostCount"
+
+			const inserted = await sql`
+			WITH inserted AS (
+				WITH uris (uri) AS (
+				  SELECT uri FROM post WHERE uri IS NOT NULL ORDER BY "uri" ASC LIMIT ${limit} OFFSET ${offset}
+				)
+				INSERT INTO post_agg ("uri", "replyCount", "likeCount", "repostCount")
+				SELECT
+				  v.uri,
+				  COALESCE(replies.count, 0) as "replyCount",
+				  COALESCE(likes.count, 0) as "likeCount",
+				  COALESCE(reposts.count, 0) as "repostCount"
+				FROM uris v
+				LEFT JOIN (
+				  SELECT "replyParent" as uri, COUNT(*) as count
+				  FROM post
+				  WHERE "replyParent" IN (SELECT uri FROM uris)
+				    AND (post."violatesThreadGate" IS NULL OR post."violatesThreadGate" = false)
+				  GROUP BY "replyParent"
+				) replies ON replies.uri = v.uri
+				LEFT JOIN (
+				  SELECT subject as uri, COUNT(*) as count
+				  FROM "like"
+				  WHERE subject IN (SELECT uri FROM uris)
+				  GROUP BY subject
+				) likes ON likes.uri = v.uri
+				LEFT JOIN (
+				  SELECT subject as uri, COUNT(*) as count
+				  FROM repost
+				  WHERE subject IN (SELECT uri FROM uris)
+				  GROUP BY subject
+				) reposts ON reposts.uri = v.uri
+				ON CONFLICT (uri) DO UPDATE
+				SET "replyCount" = excluded."replyCount",
+				    "likeCount" = excluded."likeCount",
+				    "repostCount" = excluded."repostCount"
+			    RETURNING 1
+		    )
+		    SELECT * FROM inserted
 			`.execute(db);
+
+			if (inserted.rows.length === 0) break;
+
 			console.timeEnd(`backfilling posts ${i + 1}/${batches}`);
+			i++;
 		}
 	} catch (err) {
 		console.error(`backfilling posts ${i + 1}/${batches}`, err);
@@ -123,47 +146,62 @@ async function backfillPostAggregates({ db }: Database, offset?: number | undefi
 async function backfillProfileAggregates({ db }: Database, offset?: number | undefined) {
 	const limit = 10_000;
 
-	const rowCount = await fastRowCount(db, "profile");
+	let rowCount = await fastRowCount(db, "profile");
 	console.log(`profile row count: ${rowCount}`);
 
-	const batches = Math.ceil(rowCount / limit);
+	let batches = Math.ceil(rowCount / limit);
 	let i = offset ?? 0;
 	try {
-		for (; i < batches; i++) {
+		while (true) {
+			if (i >= batches) {
+				rowCount = await fastRowCount(db, "profile");
+				batches = Math.ceil(rowCount / limit);
+			}
+
+			saveState((s) => ({ ...s, profileIndex: i }));
 			const offset = i * limit;
+
 			console.time(`backfilling profiles ${i + 1}/${batches}`);
-			await sql`
-			WITH dids (did) AS (
-				SELECT split_part(uri, '/', 3) AS did FROM profile ORDER BY "uri" ASC LIMIT ${limit} OFFSET ${offset}
+			const inserted = await sql`
+			WITH inserted AS (
+				WITH dids (did) AS (
+					SELECT split_part(uri, '/', 3) AS did FROM profile ORDER BY "uri" ASC LIMIT ${limit} OFFSET ${offset}
+				)
+				INSERT INTO profile_agg ("did", "postsCount", "followersCount", "followsCount")
+				SELECT
+					v.did,
+					COALESCE(posts.count, 0) as "postsCount",
+					COALESCE(followers.count, 0) as "followersCount",
+					COALESCE(follows.count, 0) as "followsCount"
+				FROM dids v
+				LEFT JOIN (
+					SELECT creator as did, COUNT(*) as count
+					FROM post
+					WHERE creator IN (SELECT did FROM dids)
+					GROUP BY creator
+				) posts ON posts.did = v.did
+				LEFT JOIN (
+					SELECT "subjectDid" as did, COUNT(*) as count
+					FROM follow
+					WHERE "subjectDid" IN (SELECT did FROM dids)
+					GROUP BY "subjectDid"
+				) followers ON followers.did = v.did
+				LEFT JOIN (
+					SELECT creator as did, COUNT(*) as count
+					FROM follow
+					WHERE creator IN (SELECT did FROM dids)
+					GROUP BY creator
+				) follows ON follows.did = v.did
+				ON CONFLICT (did) DO UPDATE SET "postsCount" = excluded."postsCount", "followersCount" = excluded."followersCount", "followsCount" = excluded."followsCount"
+				RETURNING 1
 			)
-			INSERT INTO profile_agg ("did", "postsCount", "followersCount", "followsCount")
-			SELECT
-				v.did,
-				COALESCE(posts.count, 0) as "postsCount",
-				COALESCE(followers.count, 0) as "followersCount",
-				COALESCE(follows.count, 0) as "followsCount"
-			FROM dids v
-			LEFT JOIN (
-				SELECT creator as did, COUNT(*) as count
-				FROM post
-				WHERE creator IN (SELECT did FROM dids)
-				GROUP BY creator
-			) posts ON posts.did = v.did
-			LEFT JOIN (
-				SELECT "subjectDid" as did, COUNT(*) as count
-				FROM follow
-				WHERE "subjectDid" IN (SELECT did FROM dids)
-				GROUP BY "subjectDid"
-			) followers ON followers.did = v.did
-			LEFT JOIN (
-				SELECT creator as did, COUNT(*) as count
-				FROM follow
-				WHERE creator IN (SELECT did FROM dids)
-				GROUP BY creator
-			) follows ON follows.did = v.did
-			ON CONFLICT (did) DO UPDATE SET "postsCount" = excluded."postsCount", "followersCount" = excluded."followersCount", "followsCount" = excluded."followsCount"
+			SELECT * FROM inserted
 			`.execute(db);
+
+			if (inserted.rows.length === 0) break;
+
 			console.timeEnd(`backfilling profiles ${i + 1}/${batches}`);
+			i++;
 		}
 	} catch (err) {
 		console.error(`backfilling profiles ${i + 1}/${batches}`, err);
@@ -174,13 +212,19 @@ async function backfillProfileAggregates({ db }: Database, offset?: number | und
 async function backfillPostValidation({ db }: Database, offset?: number | undefined) {
 	const limit = 10_000;
 
-	const rowCount = await fastRowCount(db, "post");
+	let rowCount = await fastRowCount(db, "post");
 	console.log(`post row count: ${rowCount}`);
 
-	const batches = Math.ceil(rowCount / limit);
+	let batches = Math.ceil(rowCount / limit);
 	let i = offset ?? 0;
 	try {
-		for (; i < batches; i++) {
+		while (true) {
+			if (i >= batches) {
+				rowCount = await fastRowCount(db, "post");
+				batches = Math.ceil(rowCount / limit);
+			}
+
+			saveState((s) => ({ ...s, validationIndex: i }));
 			const offset = i * limit;
 
 			const invalidReplyUpdates: Array<
@@ -204,6 +248,8 @@ async function backfillPostValidation({ db }: Database, offset?: number | undefi
 				"uri",
 				"asc",
 			).limit(limit).offset(offset).execute();
+
+			if (posts.length === 0) break;
 
 			await Promise.all([validateReplyStatus(), validateEmbeddingRules()]);
 
@@ -240,12 +286,12 @@ async function backfillPostValidation({ db }: Database, offset?: number | undefi
 				await executeRaw(
 					db,
 					`
-			    UPDATE post SET "invalidReplyRoot" = v."invalidReplyRoot", "violatesThreadGate" = v."violatesThreadGate"
-			    FROM (
-			      SELECT * FROM unnest($1::text[], $2::boolean[], $3::boolean[]) AS t(uri, "invalidReplyRoot", "violatesThreadGate")
-			    ) as v
-			    WHERE post.uri = v.uri
-				`,
+					UPDATE post SET "invalidReplyRoot" = v."invalidReplyRoot", "violatesThreadGate" = v."violatesThreadGate"
+					FROM (
+						SELECT * FROM unnest($1::text[], $2::boolean[], $3::boolean[]) AS t(uri, "invalidReplyRoot", "violatesThreadGate")
+					) as v
+					WHERE post.uri = v.uri
+					`,
 					invalidReplyUpdates,
 				);
 
@@ -281,18 +327,21 @@ async function backfillPostValidation({ db }: Database, offset?: number | undefi
 					await executeRaw(
 						db,
 						`
-				     UPDATE post SET "violatesEmbeddingRules" = v."violatesEmbeddingRules"
-				     FROM (
-					 	SELECT * FROM unnest($1::text[], $2::boolean[]) AS t(uri, "violatesEmbeddingRules")
-				     ) as v
-				     WHERE post.uri = v.uri
-				    `,
+						UPDATE post SET "violatesEmbeddingRules" = v."violatesEmbeddingRules"
+						FROM (
+							SELECT * FROM unnest($1::text[], $2::boolean[]) AS t(uri, "violatesEmbeddingRules")
+						) as v
+						WHERE post.uri = v.uri
+						`,
 						violatesEmbeddingRulesUpdates,
 					);
 				}
 
 				console.timeEnd(`validating embedding rules ${i + 1}/${batches}`);
 			}
+
+			console.timeEnd(`validating posts ${i + 1}/${batches}`);
+			i++;
 		}
 	} catch (err) {
 		console.error(`validating posts ${i + 1}/${batches}`, err);
@@ -433,4 +482,21 @@ function addExitHandlers(db: Database) {
 		);
 		console.log(`Exiting with code ${code}`);
 	});
+}
+
+interface State {
+	postIndex: number;
+	profileIndex: number;
+	validationIndex: number;
+}
+
+const statePath = path.join(process.cwd(), "after-backfill-state.json");
+let state: State = { postIndex: 0, profileIndex: 0, validationIndex: 0 };
+
+function loadState(): State {
+	return state = JSON.parse(fs.readFileSync(statePath, "utf-8"));
+}
+
+function saveState(updateState: (state: State) => State) {
+	fs.writeFileSync(statePath, JSON.stringify(updateState(state), null, 2));
 }
