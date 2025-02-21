@@ -101,7 +101,7 @@ async function backfillProfileAggregates({ db }: Database) {
 			console.time(`backfilling profiles ${i + 1}/${batches}`);
 			await sql`
 			WITH dids (did) AS (
-				SELECT did FROM profile WHERE did IS NOT NULL LIMIT ${limit} OFFSET ${offset}
+				SELECT did FROM actor LIMIT ${limit} OFFSET ${offset}
 			)
 			INSERT INTO profile_agg ("did", "postsCount", "followersCount", "followsCount")
 			SELECT
