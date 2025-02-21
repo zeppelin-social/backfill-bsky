@@ -37,7 +37,12 @@ for (const envVar of ["BSKY_DB_POSTGRES_URL", "BSKY_DB_POSTGRES_SCHEMA", "BSKY_D
 
 const POOL_SIZE = 500;
 
-const DB_SETTINGS = { max_parallel_workers: 24, maintenance_work_mem: "\"72GB\"" };
+const DB_SETTINGS = {
+	max_parallel_workers: 24,
+	max_parallel_workers_per_gather: 24,
+	max_worker_processes: 32,
+	maintenance_work_mem: "\"72GB\"",
+};
 
 async function main() {
 	let [postOffset, profileOffset, validationOffset] = process.argv.slice(2).map((arg) => {
