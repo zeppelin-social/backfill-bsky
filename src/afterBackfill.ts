@@ -155,77 +155,94 @@ async function backfillPostValidation({ db }: Database) {
 				"embed.embedUri as embedUri",
 			]).where("replyParent", "is not", null).where("replyRoot", "is not", null).limit(limit)
 				.offset(offset).execute();
-			for (const post of posts) {
-				if (
-					!post.replyParent || !post.replyParentCid || !post.replyRoot
-					|| !post.replyRootCid
-				) continue;
-				try {
-					const { invalidReplyRoot, violatesThreadGate } = await validateReply(
-						db,
-						post.creator,
-						{
-							parent: { uri: post.replyParent, cid: post.replyParentCid },
-							root: { uri: post.replyRoot, cid: post.replyRootCid },
-						},
-					);
-					if (invalidReplyRoot || violatesThreadGate) {
-						invalidReplyUpdates.push([post.uri, invalidReplyRoot, violatesThreadGate]);
-					}
-				} catch (err) {
-					console.error(`validating post ${post.uri}`, err);
-				}
-			}
 
-			console.time(`validating reply status ${i + 1}/${batches}`);
-			await executeRaw(
-				db,
-				`
+			await Promise.all([validateReplyStatus(), validateEmbeddingRules()]);
+
+			async function validateReplyStatus() {
+				console.time(`validating reply status ${i + 1}/${batches}`);
+
+				for (const post of posts) {
+					if (
+						!post.replyParent || !post.replyParentCid || !post.replyRoot
+						|| !post.replyRootCid
+					) continue;
+					try {
+						const { invalidReplyRoot, violatesThreadGate } = await validateReply(
+							db,
+							post.creator,
+							{
+								parent: { uri: post.replyParent, cid: post.replyParentCid },
+								root: { uri: post.replyRoot, cid: post.replyRootCid },
+							},
+						);
+						if (invalidReplyRoot || violatesThreadGate) {
+							invalidReplyUpdates.push([
+								post.uri,
+								invalidReplyRoot,
+								violatesThreadGate,
+							]);
+						}
+					} catch (err) {
+						console.error(`validating post ${post.uri}`, err);
+					}
+				}
+
+				await executeRaw(
+					db,
+					`
 			    UPDATE post SET "invalidReplyRoot" = v."invalidReplyRoot", "violatesThreadGate" = v."violatesThreadGate"
 			    FROM (
 			      SELECT * FROM unnest($1::text[], $2::boolean[], $3::boolean[]) AS t(uri, "invalidReplyRoot", "violatesThreadGate")
 			    ) as v
 			    WHERE post.uri = v.uri
 				`,
-				invalidReplyUpdates,
-			);
-			console.timeEnd(`validating reply status ${i + 1}/${batches}`);
+					invalidReplyUpdates,
+				);
 
-			const embeds: Array<{ parentUri: string; embedUri: string }> = [];
-			const violatesEmbeddingRulesUpdates: Array<
-				[uri: string, embedUri: string, violatesEmbeddingRules: boolean]
-			> = [];
-
-			console.time(`validating embedding rules ${i + 1}/${batches}`);
-			for (const post of posts) {
-				if (post.embedUri) embeds.push({ parentUri: post.uri, embedUri: post.embedUri });
+				console.timeEnd(`validating reply status ${i + 1}/${batches}`);
 			}
 
-			const embedsToUpdate = await validatePostEmbedsBulk(db, embeds);
-			for (const embed of embedsToUpdate) {
-				if (embed.violatesEmbeddingRules) {
-					violatesEmbeddingRulesUpdates.push([
-						embed.parentUri,
-						embed.embedUri,
-						embed.violatesEmbeddingRules,
-					]);
+			async function validateEmbeddingRules() {
+				console.time(`validating embedding rules ${i + 1}/${batches}`);
+
+				const embeds: Array<{ parentUri: string; embedUri: string }> = [];
+				const violatesEmbeddingRulesUpdates: Array<
+					[uri: string, embedUri: string, violatesEmbeddingRules: boolean]
+				> = [];
+
+				for (const post of posts) {
+					if (post.embedUri) {
+						embeds.push({ parentUri: post.uri, embedUri: post.embedUri });
+					}
 				}
-			}
 
-			if (violatesEmbeddingRulesUpdates.length) {
-				await executeRaw(
-					db,
-					`
+				const embedsToUpdate = await validatePostEmbedsBulk(db, embeds);
+				for (const embed of embedsToUpdate) {
+					if (embed.violatesEmbeddingRules) {
+						violatesEmbeddingRulesUpdates.push([
+							embed.parentUri,
+							embed.embedUri,
+							embed.violatesEmbeddingRules,
+						]);
+					}
+				}
+
+				if (violatesEmbeddingRulesUpdates.length) {
+					await executeRaw(
+						db,
+						`
 				     UPDATE post SET "violatesEmbeddingRules" = v."violatesEmbeddingRules"
 				     FROM (
 					 	SELECT * FROM unnest($1::text[], $2::boolean[]) AS t(uri, "violatesEmbeddingRules")
 				     ) as v
 				     WHERE post.uri = v.uri
 				    `,
-					violatesEmbeddingRulesUpdates,
-				);
+						violatesEmbeddingRulesUpdates,
+					);
+				}
+
+				console.timeEnd(`validating embedding rules ${i + 1}/${batches}`);
 			}
-			console.timeEnd(`validating embedding rules ${i + 1}/${batches}`);
 		}
 	} catch (err) {
 		console.error(`validating posts ${i + 1}/${batches}`, err);
