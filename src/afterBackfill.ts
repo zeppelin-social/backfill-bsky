@@ -85,7 +85,7 @@ async function backfillPostAggregates({ db }: Database) {
 					AND (post."violatesThreadGate" IS NULL OR post."violatesThreadGate" = false)
 					GROUP BY "replyParent"
 					`,
-					uris,
+					[uris],
 				).then((res) => new Map(res.rows.map((r) => [r.uri, Number(r.count)]))),
 
 				executeRaw<{ uri: string; count: string }>(
@@ -96,7 +96,7 @@ async function backfillPostAggregates({ db }: Database) {
 					INNER JOIN unnest($1::text[]) as uris(uri) ON uris.uri = subject
 					GROUP BY subject
 					`,
-					uris,
+					[uris],
 				).then((res) => new Map(res.rows.map((r) => [r.uri, Number(r.count)]))),
 
 				executeRaw<{ uri: string; count: string }>(
@@ -107,7 +107,7 @@ async function backfillPostAggregates({ db }: Database) {
 					INNER JOIN unnest($1::text[]) as uris(uri) ON uris.uri = subject
 					GROUP BY subject
 					`,
-					uris,
+					[uris],
 				).then((res) => new Map(res.rows.map((r) => [r.uri, Number(r.count)]))),
 			]);
 
