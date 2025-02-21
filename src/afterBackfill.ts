@@ -57,8 +57,7 @@ async function main() {
 void main();
 
 async function backfillPostAggregates({ db }: Database) {
-	const limit = 1_000_000;
-
+	const limit = 10_000;
 	const rowCount = await fastRowCount(db, "post");
 	console.log(`post row count: ${rowCount}`);
 
@@ -68,41 +67,69 @@ async function backfillPostAggregates({ db }: Database) {
 		for (; i < batches; i++) {
 			const offset = i * limit;
 			console.time(`backfilling posts ${i + 1}/${batches}`);
+
+			const uris = await sql<{ uri: string }>`
+	        SELECT uri FROM post
+	        WHERE uri IS NOT NULL
+	        LIMIT ${limit}
+	        OFFSET ${offset}
+      		`.execute(db).then((res) => res.rows.map((r) => r.uri));
+
+			const [replies, likes, reposts] = await Promise.all([
+				executeRaw<{ uri: string; count: string }>(
+					db,
+					`
+					SELECT "replyParent" as uri, COUNT(*) as count
+					FROM post
+					INNER JOIN unnest($1::text[]) as uris(uri) ON uris.uri = "replyParent"
+					AND (post."violatesThreadGate" IS NULL OR post."violatesThreadGate" = false)
+					GROUP BY "replyParent"
+					`,
+					uris,
+				).then((res) => new Map(res.rows.map((r) => [r.uri, Number(r.count)]))),
+
+				executeRaw<{ uri: string; count: string }>(
+					db,
+					`
+					SELECT subject as uri, COUNT(*) as count
+					FROM "like"
+					INNER JOIN unnest($1::text[]) as uris(uri) ON uris.uri = subject
+					GROUP BY subject
+					`,
+					uris,
+				).then((res) => new Map(res.rows.map((r) => [r.uri, Number(r.count)]))),
+
+				executeRaw<{ uri: string; count: string }>(
+					db,
+					`
+					SELECT subject as uri, COUNT(*) as count
+					FROM repost
+					INNER JOIN unnest($1::text[]) as uris(uri) ON uris.uri = subject
+					GROUP BY subject
+					`,
+					uris,
+				).then((res) => new Map(res.rows.map((r) => [r.uri, Number(r.count)]))),
+			]);
+
+			const updates = uris.map((uri) => ({
+				uri,
+				replyCount: replies.get(uri) || 0,
+				likeCount: likes.get(uri) || 0,
+				repostCount: reposts.get(uri) || 0,
+			}));
+
 			await sql`
-			WITH uris (uri) AS (
-			  SELECT uri FROM post WHERE uri IS NOT NULL LIMIT ${limit} OFFSET ${offset}
-			)
-			INSERT INTO post_agg ("uri", "replyCount", "likeCount", "repostCount")
-			SELECT
-			  v.uri,
-			  COALESCE(replies.count, 0) as "replyCount",
-			  COALESCE(likes.count, 0) as "likeCount",
-			  COALESCE(reposts.count, 0) as "repostCount"
-			FROM uris v
-			LEFT JOIN (
-			  SELECT "replyParent" as uri, COUNT(*) as count
-			  FROM post
-			  WHERE "replyParent" IN (SELECT uri FROM uris)
-			    AND (post."violatesThreadGate" IS NULL OR post."violatesThreadGate" = false)
-			  GROUP BY "replyParent"
-			) replies ON replies.uri = v.uri
-			LEFT JOIN (
-			  SELECT subject as uri, COUNT(*) as count
-			  FROM "like"
-			  WHERE subject IN (SELECT uri FROM uris)
-			  GROUP BY subject
-			) likes ON likes.uri = v.uri
-			LEFT JOIN (
-			  SELECT subject as uri, COUNT(*) as count
-			  FROM repost
-			  WHERE subject IN (SELECT uri FROM uris)
-			  GROUP BY subject
-			) reposts ON reposts.uri = v.uri
-			ON CONFLICT (uri) DO UPDATE
-			SET "replyCount" = excluded."replyCount",
-			    "likeCount" = excluded."likeCount",
-			    "repostCount" = excluded."repostCount"
-		`.execute(db);
+        INSERT INTO post_agg ("uri", "replyCount", "likeCount", "repostCount")
+        SELECT * FROM jsonb_to_recordset(${
+				sql.literal(JSON.stringify(updates))
+			}) AS t("uri" text, "replyCount" int, "likeCount" int, "repostCount" int)
+        AS t("uri" text, "replyCount" int, "likeCount" int, "repostCount" int)
+        ON CONFLICT (uri) DO UPDATE
+        SET "replyCount" = excluded."replyCount",
+            "likeCount" = excluded."likeCount",
+            "repostCount" = excluded."repostCount"
+      `.execute(db);
+
 			console.timeEnd(`backfilling posts ${i + 1}/${batches}`);
 		}
 	} catch (err) {
