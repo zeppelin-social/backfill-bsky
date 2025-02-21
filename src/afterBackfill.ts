@@ -120,9 +120,7 @@ async function backfillPostAggregates({ db }: Database) {
 
 			await sql`
         INSERT INTO post_agg ("uri", "replyCount", "likeCount", "repostCount")
-        SELECT * FROM jsonb_to_recordset(${
-				sql.literal(JSON.stringify(updates))
-			}) AS t("uri" text, "replyCount" int, "likeCount" int, "repostCount" int)
+        SELECT * FROM jsonb_to_recordset(${sql.literal(JSON.stringify(updates))})
         AS t("uri" text, "replyCount" int, "likeCount" int, "repostCount" int)
         ON CONFLICT (uri) DO UPDATE
         SET "replyCount" = excluded."replyCount",
