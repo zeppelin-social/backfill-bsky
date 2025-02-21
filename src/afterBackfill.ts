@@ -35,12 +35,18 @@ for (const envVar of ["BSKY_DB_POSTGRES_URL", "BSKY_DB_POSTGRES_SCHEMA", "BSKY_D
 
 const POOL_SIZE = 500;
 
+const DB_SETTINGS = { max_parallel_workers: 24, maintenance_work_mem: "\"36GB\"" };
+
 async function main() {
 	const db = new Database({
 		url: process.env.BSKY_DB_POSTGRES_URL,
 		schema: process.env.BSKY_DB_POSTGRES_SCHEMA,
 		poolSize: POOL_SIZE,
 	});
+
+	await alterDbSettings(db);
+	await createIndexes(db);
+	addExitHandlers(db);
 
 	await backfillPostAggregates(db);
 	await backfillProfileAggregates(db);
@@ -63,22 +69,38 @@ async function backfillPostAggregates({ db }: Database) {
 			console.time(`backfilling posts ${i + 1}/${batches}`);
 			await sql`
 			WITH uris (uri) AS (
-				SELECT uri FROM post WHERE uri IS NOT NULL LIMIT ${sql.literal(limit)} OFFSET ${sql.literal(offset)}
+			  SELECT uri FROM post WHERE uri IS NOT NULL LIMIT ${limit} OFFSET ${offset}
 			)
 			INSERT INTO post_agg ("uri", "replyCount", "likeCount", "repostCount")
 			SELECT
-				v.uri,
-				count(post."replyParent") AS "replyCount",
-				count(like.uri) AS "likeCount",
-				count(repost.uri) AS "repostCount"
-			FROM
-				uris AS v
-				LEFT JOIN post ON post."replyParent" = v.uri
-					AND (post."violatesThreadGate" IS NULL OR post."violatesThreadGate" = false)
-				LEFT JOIN like ON like.subject = v.uri
-				LEFT JOIN repost ON repost.subject = v.uri
-			GROUP BY v.uri
-			ON CONFLICT (uri) DO UPDATE SET "replyCount" = excluded."replyCount", "likeCount" = excluded."likeCount", "repostCount" = excluded."repostCount"
+			  v.uri,
+			  COALESCE(replies.count, 0) as "replyCount",
+			  COALESCE(likes.count, 0) as "likeCount",
+			  COALESCE(reposts.count, 0) as "repostCount"
+			FROM uris v
+			LEFT JOIN (
+			  SELECT "replyParent" as uri, COUNT(*) as count
+			  FROM post
+			  WHERE "replyParent" IN (SELECT uri FROM uris)
+			    AND (post."violatesThreadGate" IS NULL OR post."violatesThreadGate" = false)
+			  GROUP BY "replyParent"
+			) replies ON replies.uri = v.uri
+			LEFT JOIN (
+			  SELECT subject as uri, COUNT(*) as count
+			  FROM "like"
+			  WHERE subject IN (SELECT uri FROM uris)
+			  GROUP BY subject
+			) likes ON likes.uri = v.uri
+			LEFT JOIN (
+			  SELECT subject as uri, COUNT(*) as count
+			  FROM repost
+			  WHERE subject IN (SELECT uri FROM uris)
+			  GROUP BY subject
+			) reposts ON reposts.uri = v.uri
+			ON CONFLICT (uri) DO UPDATE
+			SET "replyCount" = excluded."replyCount",
+			    "likeCount" = excluded."likeCount",
+			    "repostCount" = excluded."repostCount"
 		`.execute(db);
 			console.timeEnd(`backfilling posts ${i + 1}/${batches}`);
 		}
@@ -332,4 +354,54 @@ async function fastRowCount(db: DatabaseSchema, table: string) {
 		AS row_count FROM pg_class
 		WHERE oid = ${sql.literal(table)}::regclass
 	`.execute(db).then((res) => res.rows[0].row_count);
+}
+
+async function createIndexes(db: Database) {
+	return Promise.all([
+		db.pool.query(
+			`CREATE INDEX IF NOT EXISTS "idx_post_replyparent" ON "post" ("replyParent") WHERE "violatesThreadGate" IS NULL OR "violatesThreadGate" = FALSE`,
+		),
+		db.pool.query(`CREATE INDEX IF NOT EXISTS "idx_like_subject" ON "like" ("subject")`),
+		db.pool.query(`CREATE INDEX IF NOT EXISTS "idx_repost_subject" ON "repost" ("subject")`),
+		db.pool.query(`CREATE INDEX IF NOT EXISTS "idx_post_creator" ON "post" ("creator")`),
+		db.pool.query(`CREATE INDEX IF NOT EXISTS "idx_follow_subject" ON "follow" ("subjectDid")`),
+		db.pool.query(`CREATE INDEX IF NOT EXISTS "idx_follow_creator" ON "follow" ("creator")`),
+		db.pool.query(
+			`CREATE INDEX IF NOT EXISTS "idx_post_reply_combined" ON "post" ("replyParent", "replyRoot") WHERE "replyParent" IS NOT NULL AND "replyRoot" IS NOT NULL`,
+		),
+		db.pool.query(
+			`CREATE INDEX IF NOT EXISTS "idx_post_embed" ON "post_embed_record" ("postUri", "embedUri")`,
+		),
+	]);
+}
+
+async function alterDbSettings(db: Database) {
+	return Promise.all(
+		Object.entries(DB_SETTINGS).map(([setting, value]) =>
+			db.pool.query(`ALTER SYSTEM SET ${setting} = ${value}`)
+		),
+	);
+}
+
+function addExitHandlers(db: Database) {
+	let reset = false;
+	process.on("beforeExit", async () => {
+		console.log("Resetting DB settings");
+		await Promise.all(
+			Object.keys(DB_SETTINGS).map((setting) =>
+				db.pool.query(`ALTER SYSTEM RESET ${setting}`)
+			),
+		);
+
+		console.log("Closing DB connection");
+		await db.pool.end();
+		reset = true;
+	});
+	process.on("exit", (code) => {
+		if (reset) return;
+		console.log(
+			Object.keys(DB_SETTINGS).map((setting) => `ALTER SYSTEM RESET ${setting};`).join(" "),
+		);
+		console.log(`Exiting with code ${code}`);
+	});
 }
