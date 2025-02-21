@@ -48,15 +48,16 @@ async function main() {
 	await createIndexes(db);
 	addExitHandlers(db);
 
-	await backfillPostAggregates(db);
-	await backfillProfileAggregates(db);
+	console.log("beginning backfill...");
+
+	await Promise.allSettled([backfillPostAggregates(db), backfillProfileAggregates(db)]);
 	await backfillPostValidation(db);
 }
 
 void main();
 
 async function backfillPostAggregates({ db }: Database) {
-	const limit = 10_000_000;
+	const limit = 1_000_000;
 
 	const rowCount = await fastRowCount(db, "post");
 	console.log(`post row count: ${rowCount}`);
