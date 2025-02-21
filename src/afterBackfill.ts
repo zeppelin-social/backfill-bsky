@@ -38,6 +38,13 @@ const POOL_SIZE = 500;
 const DB_SETTINGS = { max_parallel_workers: 24, maintenance_work_mem: "\"72GB\"" };
 
 async function main() {
+	const [postOffset, profileOffset, validationOffset] = process.argv.slice(2).map((arg) => {
+		if (!arg) return undefined;
+		const num = parseInt(arg);
+		if (isNaN(num)) throw new Error(`Invalid offset: ${arg}`);
+		return num;
+	});
+
 	const db = new Database({
 		url: process.env.BSKY_DB_POSTGRES_URL,
 		schema: process.env.BSKY_DB_POSTGRES_SCHEMA,
@@ -50,84 +57,61 @@ async function main() {
 
 	console.log("beginning backfill...");
 
-	await Promise.allSettled([backfillPostAggregates(db), backfillProfileAggregates(db)]);
-	await backfillPostValidation(db);
+	await Promise.allSettled([
+		backfillPostAggregates(db, postOffset),
+		backfillProfileAggregates(db, profileOffset),
+	]);
+	await backfillPostValidation(db, validationOffset);
 }
 
 void main();
 
-async function backfillPostAggregates({ db }: Database) {
+async function backfillPostAggregates({ db }: Database, offset?: number | undefined) {
 	const limit = 10_000;
 	const rowCount = await fastRowCount(db, "post");
 	console.log(`post row count: ${rowCount}`);
 
 	const batches = Math.ceil(rowCount / limit);
-	let i = 0;
+	let i = offset ?? 0;
 	try {
 		for (; i < batches; i++) {
 			const offset = i * limit;
 			console.time(`backfilling posts ${i + 1}/${batches}`);
-
-			const uris = await sql<{ uri: string }>`
-	        SELECT uri FROM post
-	        WHERE uri IS NOT NULL
-	        LIMIT ${limit}
-	        OFFSET ${offset}
-      		`.execute(db).then((res) => res.rows.map((r) => r.uri));
-
-			const [replies, likes, reposts] = await Promise.all([
-				executeRaw<{ uri: string; count: string }>(
-					db,
-					`
-					SELECT "replyParent" as uri, COUNT(*) as count
-					FROM post
-					INNER JOIN unnest($1::text[]) as uris(uri) ON uris.uri = "replyParent"
-					AND (post."violatesThreadGate" IS NULL OR post."violatesThreadGate" = false)
-					GROUP BY "replyParent"
-					`,
-					[uris],
-				).then((res) => new Map(res.rows.map((r) => [r.uri, Number(r.count)]))),
-
-				executeRaw<{ uri: string; count: string }>(
-					db,
-					`
-					SELECT subject as uri, COUNT(*) as count
-					FROM "like"
-					INNER JOIN unnest($1::text[]) as uris(uri) ON uris.uri = subject
-					GROUP BY subject
-					`,
-					[uris],
-				).then((res) => new Map(res.rows.map((r) => [r.uri, Number(r.count)]))),
-
-				executeRaw<{ uri: string; count: string }>(
-					db,
-					`
-					SELECT subject as uri, COUNT(*) as count
-					FROM repost
-					INNER JOIN unnest($1::text[]) as uris(uri) ON uris.uri = subject
-					GROUP BY subject
-					`,
-					[uris],
-				).then((res) => new Map(res.rows.map((r) => [r.uri, Number(r.count)]))),
-			]);
-
-			const updates = uris.map((uri) => ({
-				uri,
-				replyCount: replies.get(uri) || 0,
-				likeCount: likes.get(uri) || 0,
-				repostCount: reposts.get(uri) || 0,
-			}));
-
 			await sql`
-        INSERT INTO post_agg ("uri", "replyCount", "likeCount", "repostCount")
-        SELECT * FROM jsonb_to_recordset(${sql.literal(JSON.stringify(updates))})
-        AS t("uri" text, "replyCount" int, "likeCount" int, "repostCount" int)
-        ON CONFLICT (uri) DO UPDATE
-        SET "replyCount" = excluded."replyCount",
-            "likeCount" = excluded."likeCount",
-            "repostCount" = excluded."repostCount"
-      `.execute(db);
-
+			WITH uris (uri) AS (
+			  SELECT uri FROM post WHERE uri IS NOT NULL ORDER BY "createdAt" DESC LIMIT ${limit} OFFSET ${offset}
+			)
+			INSERT INTO post_agg ("uri", "replyCount", "likeCount", "repostCount")
+			SELECT
+			  v.uri,
+			  COALESCE(replies.count, 0) as "replyCount",
+			  COALESCE(likes.count, 0) as "likeCount",
+			  COALESCE(reposts.count, 0) as "repostCount"
+			FROM uris v
+			LEFT JOIN (
+			  SELECT "replyParent" as uri, COUNT(*) as count
+			  FROM post
+			  WHERE "replyParent" IN (SELECT uri FROM uris)
+			    AND (post."violatesThreadGate" IS NULL OR post."violatesThreadGate" = false)
+			  GROUP BY "replyParent"
+			) replies ON replies.uri = v.uri
+			LEFT JOIN (
+			  SELECT subject as uri, COUNT(*) as count
+			  FROM "like"
+			  WHERE subject IN (SELECT uri FROM uris)
+			  GROUP BY subject
+			) likes ON likes.uri = v.uri
+			LEFT JOIN (
+			  SELECT subject as uri, COUNT(*) as count
+			  FROM repost
+			  WHERE subject IN (SELECT uri FROM uris)
+			  GROUP BY subject
+			) reposts ON reposts.uri = v.uri
+			ON CONFLICT (uri) DO UPDATE
+			SET "replyCount" = excluded."replyCount",
+			    "likeCount" = excluded."likeCount",
+			    "repostCount" = excluded."repostCount"
+		`.execute(db);
 			console.timeEnd(`backfilling posts ${i + 1}/${batches}`);
 		}
 	} catch (err) {
@@ -136,21 +120,21 @@ async function backfillPostAggregates({ db }: Database) {
 	}
 }
 
-async function backfillProfileAggregates({ db }: Database) {
-	const limit = 1_000_000;
+async function backfillProfileAggregates({ db }: Database, offset?: number | undefined) {
+	const limit = 10_000;
 
 	const rowCount = await fastRowCount(db, "profile");
 	console.log(`profile row count: ${rowCount}`);
 
 	const batches = Math.ceil(rowCount / limit);
-	let i = 0;
+	let i = offset ?? 0;
 	try {
 		for (; i < batches; i++) {
 			const offset = i * limit;
 			console.time(`backfilling profiles ${i + 1}/${batches}`);
 			await sql`
 			WITH dids (did) AS (
-				SELECT split_part(uri, '/', 3) AS did FROM profile LIMIT ${limit} OFFSET ${offset}
+				SELECT split_part(uri, '/', 3) AS did FROM profile ORDER BY "createdAt" DESC LIMIT ${limit} OFFSET ${offset}
 			)
 			INSERT INTO profile_agg ("did", "postsCount", "followersCount", "followsCount")
 			SELECT
@@ -174,14 +158,14 @@ async function backfillProfileAggregates({ db }: Database) {
 	}
 }
 
-async function backfillPostValidation({ db }: Database) {
-	const limit = 1_000_000;
+async function backfillPostValidation({ db }: Database, offset?: number | undefined) {
+	const limit = 10_000;
 
 	const rowCount = await fastRowCount(db, "post");
 	console.log(`post row count: ${rowCount}`);
 
 	const batches = Math.ceil(rowCount / limit);
-	let i = 0;
+	let i = offset ?? 0;
 	try {
 		for (; i < batches; i++) {
 			const offset = i * limit;
@@ -203,8 +187,10 @@ async function backfillPostValidation({ db }: Database) {
 				"creator",
 				"uri",
 				"embed.embedUri as embedUri",
-			]).where("replyParent", "is not", null).where("replyRoot", "is not", null).limit(limit)
-				.offset(offset).execute();
+			]).where("replyParent", "is not", null).where("replyRoot", "is not", null).orderBy(
+				"createdAt",
+				"desc",
+			).limit(limit).offset(offset).execute();
 
 			await Promise.all([validateReplyStatus(), validateEmbeddingRules()]);
 
