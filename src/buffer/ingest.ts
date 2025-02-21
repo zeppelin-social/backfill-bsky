@@ -19,9 +19,12 @@ for (const envVar of ["BSKY_DB_POSTGRES_URL", "BSKY_DB_POSTGRES_SCHEMA", "BSKY_D
 
 class BufferReader {
 	private stream: Readable;
+	public bufferSize: number;
+	public position = 0;
 
 	constructor(filename: string) {
 		this.stream = fs.createReadStream(filename);
+		this.bufferSize = fs.statSync(filename).size;
 	}
 
 	async *read(): AsyncGenerator<Uint8Array> {
@@ -32,17 +35,16 @@ class BufferReader {
 				buffer = Buffer.concat([buffer, chunk as Buffer]);
 
 				while (buffer.length >= 4) {
-					// Read message length
 					const messageLength = buffer.readUInt32LE(0);
 					const totalLength = messageLength + 4;
 
 					// Check if we have the complete message
 					if (buffer.length >= totalLength) {
-						// Extract the message
 						const message = new Uint8Array(buffer.subarray(4, totalLength));
 
 						// Remove processed data from buffer
 						buffer = buffer.subarray(totalLength);
+						this.position += totalLength;
 
 						yield message;
 					} else {
@@ -67,6 +69,11 @@ class FromBufferSubscription extends FirehoseSubscription {
 	}
 
 	override async start() {
+		setInterval(() => {
+			const progress = this.reader.position / this.reader.bufferSize * 100;
+			console.log(`Buffer progress: ${progress.toFixed(2)}%`);
+		}, 10_000);
+
 		try {
 			for await (const chunk of this.reader.read()) {
 				// @ts-expect-error
@@ -111,13 +118,14 @@ async function main() {
 
 	const indexer = new FromBufferSubscription(reader, {
 		service: "",
+		// Keep low to avoid deadlock
 		minWorkers: 4,
 		maxWorkers: 4,
 		idResolverOptions: { plcUrl: process.env.BSKY_DID_PLC_URL },
 		dbOptions: {
 			url: process.env.BSKY_DB_POSTGRES_URL,
 			schema: process.env.BSKY_DB_POSTGRES_SCHEMA,
-			poolSize: 400,
+			poolSize: 500,
 		},
 		onError: (err) => console.error(...(err.cause ? [err.message, err.cause] : [err])),
 	});
