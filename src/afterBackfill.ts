@@ -111,7 +111,7 @@ async function backfillPostAggregates({ db }: Database, offset?: number | undefi
 			SET "replyCount" = excluded."replyCount",
 			    "likeCount" = excluded."likeCount",
 			    "repostCount" = excluded."repostCount"
-		`.execute(db);
+			`.execute(db);
 			console.timeEnd(`backfilling posts ${i + 1}/${batches}`);
 		}
 	} catch (err) {
@@ -139,17 +139,30 @@ async function backfillProfileAggregates({ db }: Database, offset?: number | und
 			INSERT INTO profile_agg ("did", "postsCount", "followersCount", "followsCount")
 			SELECT
 				v.did,
-				count(post.creator) AS "postsCount",
-				count(followers."subjectDid") AS "followersCount",
-				count(follows.creator) AS "followsCount"
-			FROM
-				dids AS v
-				LEFT JOIN post ON post.creator = v.did
-				LEFT JOIN follow AS followers ON followers."subjectDid" = v.did
-				LEFT JOIN follow AS follows ON follows.creator = v.did
-			GROUP BY v.did
+				COALESCE(posts.count, 0) as "postsCount",
+				COALESCE(followers.count, 0) as "followersCount",
+				COALESCE(follows.count, 0) as "followsCount"
+			FROM dids v
+			LEFT JOIN (
+				SELECT creator as did, COUNT(*) as count
+				FROM post
+				WHERE creator IN (SELECT did FROM dids)
+				GROUP BY creator
+			) posts ON posts.did = v.did
+			LEFT JOIN (
+				SELECT "subjectDid" as did, COUNT(*) as count
+				FROM follow
+				WHERE "subjectDid" IN (SELECT did FROM dids)
+				GROUP BY "subjectDid"
+			) followers ON followers.did = v.did
+			LEFT JOIN (
+				SELECT creator as did, COUNT(*) as count
+				FROM follow
+				WHERE creator IN (SELECT did FROM dids)
+				GROUP BY creator
+			) follows ON follows.did = v.did
 			ON CONFLICT (did) DO UPDATE SET "postsCount" = excluded."postsCount", "followersCount" = excluded."followersCount", "followsCount" = excluded."followsCount"
-		`.execute(db);
+			`.execute(db);
 			console.timeEnd(`backfilling profiles ${i + 1}/${batches}`);
 		}
 	} catch (err) {
