@@ -79,7 +79,7 @@ async function backfillPostAggregates({ db }: Database, offset?: number | undefi
 			console.time(`backfilling posts ${i + 1}/${batches}`);
 			await sql`
 			WITH uris (uri) AS (
-			  SELECT uri FROM post WHERE uri IS NOT NULL ORDER BY "createdAt" DESC LIMIT ${limit} OFFSET ${offset}
+			  SELECT uri FROM post WHERE uri IS NOT NULL ORDER BY "uri" ASC LIMIT ${limit} OFFSET ${offset}
 			)
 			INSERT INTO post_agg ("uri", "replyCount", "likeCount", "repostCount")
 			SELECT
@@ -134,7 +134,7 @@ async function backfillProfileAggregates({ db }: Database, offset?: number | und
 			console.time(`backfilling profiles ${i + 1}/${batches}`);
 			await sql`
 			WITH dids (did) AS (
-				SELECT split_part(uri, '/', 3) AS did FROM profile ORDER BY "createdAt" DESC LIMIT ${limit} OFFSET ${offset}
+				SELECT split_part(uri, '/', 3) AS did FROM profile ORDER BY "uri" ASC LIMIT ${limit} OFFSET ${offset}
 			)
 			INSERT INTO profile_agg ("did", "postsCount", "followersCount", "followsCount")
 			SELECT
@@ -188,8 +188,8 @@ async function backfillPostValidation({ db }: Database, offset?: number | undefi
 				"uri",
 				"embed.embedUri as embedUri",
 			]).where("replyParent", "is not", null).where("replyRoot", "is not", null).orderBy(
-				"createdAt",
-				"desc",
+				"uri",
+				"asc",
 			).limit(limit).offset(offset).execute();
 
 			await Promise.all([validateReplyStatus(), validateEmbeddingRules()]);
