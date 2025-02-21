@@ -35,6 +35,9 @@ for (const envVar of ["BSKY_DB_POSTGRES_URL", "BSKY_DB_POSTGRES_SCHEMA", "BSKY_D
 	if (!process.env[envVar]) throw new Error(`Missing env var ${envVar}`);
 }
 
+const statePath = path.join(process.cwd(), "after-backfill-state.json");
+let state: State = { postIndex: 0, profileIndex: 0, validationIndex: 0 };
+
 const POOL_SIZE = 500;
 
 const DB_SETTINGS = {
@@ -494,9 +497,6 @@ interface State {
 	profileIndex: number;
 	validationIndex: number;
 }
-
-const statePath = path.join(process.cwd(), "after-backfill-state.json");
-let state: State = { postIndex: 0, profileIndex: 0, validationIndex: 0 };
 
 function loadState(): State {
 	return state = JSON.parse(fs.readFileSync(statePath, "utf-8"));
