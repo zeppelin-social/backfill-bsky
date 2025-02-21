@@ -63,7 +63,7 @@ async function backfillPostAggregates({ db }: Database) {
 			console.time(`backfilling posts ${i + 1}/${batches}`);
 			await sql`
 			WITH uris (uri) AS (
-				SELECT uri FROM post WHERE uri IS NOT NULL LIMIT ${limit} OFFSET ${offset}
+				SELECT uri FROM post WHERE uri IS NOT NULL LIMIT ${sql.literal(limit)} OFFSET ${sql.literal(offset)}
 			)
 			INSERT INTO post_agg ("uri", "replyCount", "likeCount", "repostCount")
 			SELECT
