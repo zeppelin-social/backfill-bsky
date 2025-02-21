@@ -68,9 +68,9 @@ async function backfillPostAggregates({ db }: Database) {
 			INSERT INTO post_agg ("uri", "replyCount", "likeCount", "repostCount")
 			SELECT
 				v.uri,
-				count(post."replyParent") AS replyCount,
-				count(like.uri) AS likeCount,
-				count(repost.uri) AS repostCount
+				count(post."replyParent") AS "replyCount",
+				count(like.uri) AS "likeCount",
+				count(repost.uri) AS "repostCount"
 			FROM
 				uris AS v
 				LEFT JOIN post ON post."replyParent" = v.uri
@@ -101,14 +101,14 @@ async function backfillProfileAggregates({ db }: Database) {
 			console.time(`backfilling profiles ${i + 1}/${batches}`);
 			await sql`
 			WITH dids (did) AS (
-				SELECT did FROM actor LIMIT ${limit} OFFSET ${offset}
+				SELECT split_part(uri, '/', 3) AS did FROM profile LIMIT ${limit} OFFSET ${offset}
 			)
 			INSERT INTO profile_agg ("did", "postsCount", "followersCount", "followsCount")
 			SELECT
 				v.did,
-				count(post.creator) AS postsCount,
-				count(followers."subjectDid") AS followersCount,
-				count(follows.creator) AS followsCount
+				count(post.creator) AS "postsCount",
+				count(followers."subjectDid") AS "followersCount",
+				count(follows.creator) AS "followsCount"
 			FROM
 				dids AS v
 				LEFT JOIN post ON post.creator = v.did
