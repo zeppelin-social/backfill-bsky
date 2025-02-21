@@ -134,6 +134,7 @@ async function backfillPostAggregates({ db }: Database) {
 		}
 	} catch (err) {
 		console.error(`backfilling posts ${i + 1}/${batches}`, err);
+		if (err instanceof Error && err.stack) console.error(err.stack);
 	}
 }
 
@@ -171,6 +172,7 @@ async function backfillProfileAggregates({ db }: Database) {
 		}
 	} catch (err) {
 		console.error(`backfilling profiles ${i + 1}/${batches}`, err);
+		if (err instanceof Error && err.stack) console.error(err.stack);
 	}
 }
 
@@ -234,6 +236,7 @@ async function backfillPostValidation({ db }: Database) {
 						}
 					} catch (err) {
 						console.error(`validating post ${post.uri}`, err);
+						if (err instanceof Error && err.stack) console.error(err.stack);
 					}
 				}
 
@@ -296,6 +299,7 @@ async function backfillPostValidation({ db }: Database) {
 		}
 	} catch (err) {
 		console.error(`validating posts ${i + 1}/${batches}`, err);
+		if (err instanceof Error && err.stack) console.error(err.stack);
 	}
 }
 
