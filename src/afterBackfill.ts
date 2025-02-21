@@ -35,7 +35,7 @@ for (const envVar of ["BSKY_DB_POSTGRES_URL", "BSKY_DB_POSTGRES_SCHEMA", "BSKY_D
 
 const POOL_SIZE = 500;
 
-const DB_SETTINGS = { max_parallel_workers: 24, maintenance_work_mem: "\"36GB\"" };
+const DB_SETTINGS = { max_parallel_workers: 24, maintenance_work_mem: "\"72GB\"" };
 
 async function main() {
 	const db = new Database({
@@ -357,22 +357,22 @@ async function fastRowCount(db: DatabaseSchema, table: string) {
 }
 
 async function createIndexes(db: Database) {
-	return Promise.all([
-		db.pool.query(
-			`CREATE INDEX IF NOT EXISTS "idx_post_replyparent" ON "post" ("replyParent") WHERE "violatesThreadGate" IS NULL OR "violatesThreadGate" = FALSE`,
-		),
-		db.pool.query(`CREATE INDEX IF NOT EXISTS "idx_like_subject" ON "like" ("subject")`),
-		db.pool.query(`CREATE INDEX IF NOT EXISTS "idx_repost_subject" ON "repost" ("subject")`),
-		db.pool.query(`CREATE INDEX IF NOT EXISTS "idx_post_creator" ON "post" ("creator")`),
-		db.pool.query(`CREATE INDEX IF NOT EXISTS "idx_follow_subject" ON "follow" ("subjectDid")`),
-		db.pool.query(`CREATE INDEX IF NOT EXISTS "idx_follow_creator" ON "follow" ("creator")`),
-		db.pool.query(
-			`CREATE INDEX IF NOT EXISTS "idx_post_reply_combined" ON "post" ("replyParent", "replyRoot") WHERE "replyParent" IS NOT NULL AND "replyRoot" IS NOT NULL`,
-		),
-		db.pool.query(
-			`CREATE INDEX IF NOT EXISTS "idx_post_embed" ON "post_embed_record" ("postUri", "embedUri")`,
-		),
-	]);
+	await db.pool.query(
+		`CREATE INDEX IF NOT EXISTS "idx_post_replyparent" ON "post" ("replyParent") WHERE "violatesThreadGate" IS NULL OR "violatesThreadGate" = FALSE`,
+	);
+	await db.pool.query(`CREATE INDEX IF NOT EXISTS "idx_like_subject" ON "like" ("subject")`);
+	await db.pool.query(`CREATE INDEX IF NOT EXISTS "idx_repost_subject" ON "repost" ("subject")`);
+	await db.pool.query(`CREATE INDEX IF NOT EXISTS "idx_post_creator" ON "post" ("creator")`);
+	await db.pool.query(
+		`CREATE INDEX IF NOT EXISTS "idx_follow_subject" ON "follow" ("subjectDid")`,
+	);
+	await db.pool.query(`CREATE INDEX IF NOT EXISTS "idx_follow_creator" ON "follow" ("creator")`);
+	await db.pool.query(
+		`CREATE INDEX IF NOT EXISTS "idx_post_reply_combined" ON "post" ("replyParent", "replyRoot") WHERE "replyParent" IS NOT NULL AND "replyRoot" IS NOT NULL`,
+	);
+	await db.pool.query(
+		`CREATE INDEX IF NOT EXISTS "idx_post_embed" ON "post_embed_record" ("postUri", "embedUri")`,
+	);
 }
 
 async function alterDbSettings(db: Database) {
