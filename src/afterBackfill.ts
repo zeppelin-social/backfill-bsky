@@ -48,7 +48,7 @@ const DB_SETTINGS = {
 };
 
 async function main() {
-	let [postOffset, profileOffset, validationOffset] = process.argv.slice(2).map((arg) => {
+	let [postOffset, validationOffset] = process.argv.slice(2).map((arg) => {
 		if (!arg) return undefined;
 		const num = parseInt(arg);
 		if (isNaN(num)) throw new Error(`Invalid offset: ${arg}`);
@@ -57,7 +57,6 @@ async function main() {
 
 	const state = loadState();
 	postOffset ??= state.postIndex;
-	profileOffset ??= state.profileIndex;
 	validationOffset ??= state.validationIndex;
 
 	const db = new Database({
@@ -74,7 +73,7 @@ async function main() {
 
 	await Promise.allSettled([
 		backfillPostAggregates(db, postOffset),
-		backfillProfileAggregates(db, profileOffset),
+		backfillProfileAggregates(db),
 	]);
 	await backfillPostValidation(db, validationOffset);
 }
@@ -169,23 +168,35 @@ async function backfillProfileAggregates({ db }: Database) {
 		console.timeEnd(`backfilling profiles - fetching dids`);
 
 		console.time(`backfilling profiles - fetching posts`);
-		const posts = await db.selectFrom("post").select(["creator"]).execute();
-		for (const post of posts) {
-			const { creator } = post;
-			const fromMap = profilesMap.get(creator);
-			if (!fromMap) continue;
-			profilesMap.set(creator, { ...fromMap, postsCount: fromMap.postsCount + 1 });
+		const batchSize = 10_000_000;
+		let postsOffset = 0;
+		while (true) {
+			console.time(`backfilling profiles - fetching posts - batch ${postsOffset + 1}`);
+			const posts = await db.selectFrom("post").select(["creator"]).orderBy("uri", "asc")
+				.limit(batchSize).offset(postsOffset).execute();
+
+			if (posts.length === 0) break;
+
+			for (const post of posts) {
+				const { creator } = post;
+				const fromMap = profilesMap.get(creator);
+				if (!fromMap) continue;
+				profilesMap.set(creator, { ...fromMap, postsCount: fromMap.postsCount + 1 });
+			}
+
+			postsOffset += batchSize;
+			console.timeEnd(`backfilling profiles - fetching posts - batch ${postsOffset + 1}`);
 		}
 		console.timeEnd(`backfilling profiles - fetching posts`);
 
 		console.time(`backfilling profiles - fetching follows`);
-		const batchSize = 50_000_000;
-		let offset = 0;
+		let followsOfset = 0;
 		while (true) {
-			console.time(`backfilling profiles - fetching follows - batch ${offset + 1}`);
-			const follows = await db.selectFrom("follow").select(["subjectDid", "creator"]).limit(
-				batchSize,
-			).offset(offset).execute();
+			console.time(`backfilling profiles - fetching follows - batch ${followsOfset + 1}`);
+			const follows = await db.selectFrom("follow").select(["subjectDid", "creator"]).orderBy(
+				"uri",
+				"asc",
+			).limit(batchSize).offset(followsOfset).execute();
 
 			if (follows.length === 0) break;
 
@@ -207,8 +218,8 @@ async function backfillProfileAggregates({ db }: Database) {
 				}
 			}
 
-			offset += batchSize;
-			console.timeEnd(`backfilling profiles - fetching follows - batch ${offset + 1}`);
+			followsOfset += batchSize;
+			console.timeEnd(`backfilling profiles - fetching follows - batch ${followsOfset + 1}`);
 		}
 		console.timeEnd(`backfilling profiles - fetching follows`);
 
@@ -571,13 +582,12 @@ function batch<T>(iterable: Iterable<T>, batchSize: number): T[][] {
 
 interface State {
 	postIndex: number;
-	profileIndex: number;
 	validationIndex: number;
 }
 
 function loadState(): State {
 	if (!fs.existsSync(statePath)) {
-		state = { postIndex: 0, profileIndex: 0, validationIndex: 0 };
+		state = { postIndex: 0, validationIndex: 0 };
 		saveState((s) => s);
 		return state;
 	}
