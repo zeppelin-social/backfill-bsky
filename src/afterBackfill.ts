@@ -151,95 +151,133 @@ async function backfillPostAggregates({ db }: Database, offset?: number | undefi
 	}
 }
 
-async function backfillProfileAggregates({ db }: Database, offset?: number | undefined) {
-	const limit = 10_000;
-
+async function backfillProfileAggregates({ db }: Database) {
 	let rowCount = await fastRowCount(db, "profile");
 	console.log(`profile row count: ${rowCount}`);
 
-	let batches = Math.ceil(rowCount / limit);
-	let i = offset ?? 0;
+	const profilesMap = new Map<
+		string,
+		{ postsCount: number; followersCount: number; followsCount: number }
+	>();
+
 	try {
+		console.time(`backfilling profiles - fetching dids`);
+		const dids = await db.selectFrom("profile").select(["creator"]).execute();
+		for (const did of dids) {
+			profilesMap.set(did.creator, { postsCount: 0, followersCount: 0, followsCount: 0 });
+		}
+		console.timeEnd(`backfilling profiles - fetching dids`);
+
+		console.time(`backfilling profiles - fetching posts`);
+		const posts = await db.selectFrom("post").select(["creator"]).execute();
+		for (const post of posts) {
+			const { creator } = post;
+			const fromMap = profilesMap.get(creator);
+			if (!fromMap) continue;
+			profilesMap.set(creator, { ...fromMap, postsCount: fromMap.postsCount + 1 });
+		}
+		console.timeEnd(`backfilling profiles - fetching posts`);
+
+		console.time(`backfilling profiles - fetching follows`);
+		const batchSize = 50_000_000;
+		let offset = 0;
+		while (true) {
+			console.time(`backfilling profiles - fetching follows - batch ${offset + 1}`);
+			const follows = await db.selectFrom("follow").select(["subjectDid", "creator"]).limit(
+				batchSize,
+			).offset(offset).execute();
+
+			if (follows.length === 0) break;
+
+			for (const follow of follows) {
+				const { subjectDid, creator } = follow;
+				const subjectFromMap = profilesMap.get(subjectDid);
+				const creatorFromMap = profilesMap.get(creator);
+				if (subjectFromMap) {
+					profilesMap.set(subjectDid, {
+						...subjectFromMap,
+						followersCount: subjectFromMap.followersCount + 1,
+					});
+				}
+				if (creatorFromMap) {
+					profilesMap.set(creator, {
+						...creatorFromMap,
+						followsCount: creatorFromMap.followsCount + 1,
+					});
+				}
+			}
+
+			offset += batchSize;
+			console.timeEnd(`backfilling profiles - fetching follows - batch ${offset + 1}`);
+		}
+		console.timeEnd(`backfilling profiles - fetching follows`);
+
+		console.time(`backfilling profiles - creating aggregates`);
+		const indexes = await sql<
+			{ indexdef: string }
+		>`SELECT indexdef FROM pg_indexes WHERE tablename = 'profile_agg'`.execute(db);
+
 		console.time(`creating temp profile_agg table`);
-		await sql`CREATE TABLE IF NOT EXISTS profile_agg_temp (LIKE profile_agg INCLUDING ALL)`
+		await sql`CREATE TABLE IF NOT EXISTS profile_agg_temp (LIKE profile_agg INCLUDING CONSTRAINTS INCLUDING GENERATED INCLUDING IDENTITY INCLUDING STORAGE)`
 			.execute(db);
 		console.timeEnd(`creating temp profile_agg table`);
 
-		while (true) {
-			if (i >= batches) {
-				rowCount = await fastRowCount(db, "profile");
-				batches = Math.ceil(rowCount / limit);
+		let i = 0;
+		for (const profiles of batch(profilesMap.entries(), 100_000)) {
+			console.time(
+				`backfilling profiles - creating aggregates - batch ${i + 1}/${
+					profilesMap.size / 100_000
+				}`,
+			);
+			const transposed: [
+				dids: string[],
+				postsCount: number[],
+				followersCount: number[],
+				followsCount: number[],
+			] = [[], [], [], []];
+			for (const [did, profile] of profiles) {
+				transposed[0].push(did);
+				transposed[1].push(profile.postsCount);
+				transposed[2].push(profile.followersCount);
+				transposed[3].push(profile.followsCount);
 			}
-
-			saveState((s) => ({ ...s, profileIndex: i }));
-			const offset = i * limit;
-
-			console.time(`backfilling profiles ${i + 1}/${batches}`);
-			const inserted = await sql`
-			WITH inserted AS (
-				WITH dids AS (
-				    SELECT creator AS did
-				    FROM profile
-				    ORDER BY uri ASC
-				    LIMIT ${limit} OFFSET ${offset}
-				),
-				posts_counts AS (
-				    SELECT p.creator AS did, COUNT(*) AS postsCount
-				    FROM post p
-				    INNER JOIN dids d ON p.creator = d.did
-				    GROUP BY p.creator
-				),
-				followers_counts AS (
-				    SELECT f."subjectDid" AS did, COUNT(*) AS followersCount
-				    FROM follow f
-				    INNER JOIN dids d ON f."subjectDid" = d.did
-				    GROUP BY f."subjectDid"
-				),
-				follows_counts AS (
-				    SELECT f.creator AS did, COUNT(*) AS followsCount
-				    FROM follow f
-				    INNER JOIN dids d ON f.creator = d.did
-				    GROUP BY f.creator
-				),
-				aggregated_counts AS (
-				    SELECT
-				        d.did,
-				        COALESCE(pc.postsCount, 0) AS "postsCount",
-				        COALESCE(frc.followersCount, 0) AS "followersCount",
-				        COALESCE(flc.followsCount, 0) AS "followsCount"
-				    FROM dids d
-				    LEFT JOIN posts_counts pc ON pc.did = d.did
-				    LEFT JOIN followers_counts frc ON frc.did = d.did
-				    LEFT JOIN follows_counts flc ON flc.did = d.did
-				)
-				INSERT INTO profile_agg_temp ("did", "postsCount", "followersCount", "followsCount")
-				SELECT
-				    did,
-				    "postsCount",
-				    "followersCount",
-				    "followsCount"
-				FROM aggregated_counts
-				ON CONFLICT (did) DO UPDATE
-				SET
-				    "postsCount" = excluded."postsCount",
-				    "followersCount" = excluded."followersCount",
-				    "followsCount" = excluded."followsCount"
-				RETURNING 1
-			) SELECT * FROM inserted;
-			`.execute(db);
-
-			if (inserted.rows.length === 0) break;
-
-			console.timeEnd(`backfilling profiles ${i + 1}/${batches}`);
+			await executeRaw(
+				db,
+				`
+			INSERT INTO profile_agg_temp ("did", "postsCount", "followersCount", "followsCount")
+			SELECT * FROM unnest($1::text[], $2::bigint[], $3::bigint[], $4::bigint[]) AS t(did, "postsCount", "followersCount", "followsCount")
+			ON CONFLICT (did) DO UPDATE
+			SET "postsCount" = excluded."postsCount",
+			    "followersCount" = excluded."followersCount",
+			    "followsCount" = excluded."followsCount"
+			RETURNING 1
+			`,
+				transposed,
+			);
+			console.timeEnd(
+				`backfilling profiles - creating aggregates - batch ${i + 1}/${
+					profilesMap.size / 100_000
+				}`,
+			);
 			i++;
 		}
 
+		console.time(`backfilling profiles - replacing table`);
 		await db.transaction().execute(async (db) => {
-			await sql`DROP TABLE IF EXISTS profile_agg`.execute(db);
+			console.time(`backfilling profiles - dropping table and renaming`);
+			await db.schema.dropTable("profile_agg").execute();
 			await sql`ALTER TABLE profile_agg_temp RENAME TO profile_agg`.execute(db);
+			console.timeEnd(`backfilling profiles - dropping table and renaming`);
+
+			console.time(`backfilling profiles - recreating indexes`);
+			await Promise.all(indexes.rows.map((index) => executeRaw(db, index.indexdef, [])));
+			console.timeEnd(`backfilling profiles - recreating indexes`);
 		});
+		console.timeEnd(`backfilling profiles - replacing table`);
+
+		console.timeEnd(`backfilling profiles - creating aggregates`);
 	} catch (err) {
-		console.error(`backfilling profiles ${i + 1}/${batches}`, err);
+		console.error(`backfilling profiles`, err);
 		if (err instanceof Error && err.stack) console.error(err.stack);
 	}
 }
@@ -517,6 +555,18 @@ function addExitHandlers(db: Database) {
 		);
 		console.log(`Exiting with code ${code}`);
 	});
+}
+
+function batch<T>(iterable: Iterable<T>, batchSize: number): T[][] {
+	const result: T[][] = [[]];
+	for (const item of iterable) {
+		const arr = result[result.length - 1];
+		arr.push(item);
+		if (arr.length === batchSize) {
+			result.push([]);
+		}
+	}
+	return result;
 }
 
 interface State {
