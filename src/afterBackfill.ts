@@ -44,7 +44,7 @@ const DB_SETTINGS = {
 	max_parallel_workers: 24,
 	max_parallel_workers_per_gather: 24,
 	max_worker_processes: 32,
-	maintenance_work_mem: "\"72GB\"",
+	maintenance_work_mem: "\"48GB\"",
 };
 
 async function main() {
@@ -160,6 +160,11 @@ async function backfillProfileAggregates({ db }: Database, offset?: number | und
 	let batches = Math.ceil(rowCount / limit);
 	let i = offset ?? 0;
 	try {
+		console.time(`creating temp profile_agg table`);
+		await sql`CREATE TABLE IF NOT EXISTS profile_agg_temp (LIKE profile_agg INCLUDING ALL)`
+			.execute(db);
+		console.timeEnd(`creating temp profile_agg table`);
+
 		while (true) {
 			if (i >= batches) {
 				rowCount = await fastRowCount(db, "profile");
@@ -172,38 +177,55 @@ async function backfillProfileAggregates({ db }: Database, offset?: number | und
 			console.time(`backfilling profiles ${i + 1}/${batches}`);
 			const inserted = await sql`
 			WITH inserted AS (
-				WITH dids (did) AS (
-					SELECT split_part(uri, '/', 3) AS did FROM profile ORDER BY "uri" ASC LIMIT ${limit} OFFSET ${offset}
+				WITH dids AS (
+				    SELECT creator AS did
+				    FROM profile
+				    ORDER BY uri ASC
+				    LIMIT ${limit} OFFSET ${offset}
+				),
+				posts_counts AS (
+				    SELECT p.creator AS did, COUNT(*) AS postsCount
+				    FROM post p
+				    INNER JOIN dids d ON p.creator = d.did
+				    GROUP BY p.creator
+				),
+				followers_counts AS (
+				    SELECT f."subjectDid" AS did, COUNT(*) AS followersCount
+				    FROM follow f
+				    INNER JOIN dids d ON f."subjectDid" = d.did
+				    GROUP BY f."subjectDid"
+				),
+				follows_counts AS (
+				    SELECT f.creator AS did, COUNT(*) AS followsCount
+				    FROM follow f
+				    INNER JOIN dids d ON f.creator = d.did
+				    GROUP BY f.creator
+				),
+				aggregated_counts AS (
+				    SELECT
+				        d.did,
+				        COALESCE(pc.postsCount, 0) AS "postsCount",
+				        COALESCE(frc.followersCount, 0) AS "followersCount",
+				        COALESCE(flc.followsCount, 0) AS "followsCount"
+				    FROM dids d
+				    LEFT JOIN posts_counts pc ON pc.did = d.did
+				    LEFT JOIN followers_counts frc ON frc.did = d.did
+				    LEFT JOIN follows_counts flc ON flc.did = d.did
 				)
-				INSERT INTO profile_agg ("did", "postsCount", "followersCount", "followsCount")
+				INSERT INTO profile_agg_temp ("did", "postsCount", "followersCount", "followsCount")
 				SELECT
-					v.did,
-					COALESCE(posts.count, 0) as "postsCount",
-					COALESCE(followers.count, 0) as "followersCount",
-					COALESCE(follows.count, 0) as "followsCount"
-				FROM dids v
-				LEFT JOIN (
-					SELECT creator as did, COUNT(*) as count
-					FROM post
-					WHERE creator IN (SELECT did FROM dids)
-					GROUP BY creator
-				) posts ON posts.did = v.did
-				LEFT JOIN (
-					SELECT "subjectDid" as did, COUNT(*) as count
-					FROM follow
-					WHERE "subjectDid" IN (SELECT did FROM dids)
-					GROUP BY "subjectDid"
-				) followers ON followers.did = v.did
-				LEFT JOIN (
-					SELECT creator as did, COUNT(*) as count
-					FROM follow
-					WHERE creator IN (SELECT did FROM dids)
-					GROUP BY creator
-				) follows ON follows.did = v.did
-				ON CONFLICT (did) DO UPDATE SET "postsCount" = excluded."postsCount", "followersCount" = excluded."followersCount", "followsCount" = excluded."followsCount"
+				    did,
+				    "postsCount",
+				    "followersCount",
+				    "followsCount"
+				FROM aggregated_counts
+				ON CONFLICT (did) DO UPDATE
+				SET
+				    "postsCount" = excluded."postsCount",
+				    "followersCount" = excluded."followersCount",
+				    "followsCount" = excluded."followsCount"
 				RETURNING 1
-			)
-			SELECT * FROM inserted
+			) SELECT * FROM inserted;
 			`.execute(db);
 
 			if (inserted.rows.length === 0) break;
@@ -211,6 +233,11 @@ async function backfillProfileAggregates({ db }: Database, offset?: number | und
 			console.timeEnd(`backfilling profiles ${i + 1}/${batches}`);
 			i++;
 		}
+
+		await db.transaction().execute(async (db) => {
+			await sql`DROP TABLE IF EXISTS profile_agg`.execute(db);
+			await sql`ALTER TABLE profile_agg_temp RENAME TO profile_agg`.execute(db);
+		});
 	} catch (err) {
 		console.error(`backfilling profiles ${i + 1}/${batches}`, err);
 		if (err instanceof Error && err.stack) console.error(err.stack);
