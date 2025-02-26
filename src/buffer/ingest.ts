@@ -20,10 +20,9 @@ for (const envVar of ["BSKY_DB_POSTGRES_URL", "BSKY_DB_POSTGRES_SCHEMA", "BSKY_D
 class BufferReader {
 	private stream: Readable;
 	public bufferSize: number;
-	public position = 0;
 
-	constructor(filename: string, private readonly startPosition: number) {
-		this.stream = fs.createReadStream(filename);
+	constructor(filename: string, public position = 0) {
+		this.stream = fs.createReadStream(filename, { start: Math.max(0, position - 1) });
 		this.bufferSize = fs.statSync(filename).size;
 	}
 
@@ -46,11 +45,6 @@ class BufferReader {
 						// Remove processed data from buffer
 						buffer = buffer.subarray(totalLength);
 						this.position += totalLength;
-
-						// Skip messages before start position
-						if (this.position <= this.startPosition) {
-							continue;
-						}
 
 						yield message;
 					} else {
