@@ -90,6 +90,8 @@ class FromBufferSubscription extends FirehoseSubscription {
 		try {
 			for await (const chunk of this.reader.read()) {
 				// @ts-expect-error
+				if (this.destroyed) break;
+				// @ts-expect-error
 				const worker = await this.getNextWorker();
 				worker.postMessage({ type: "chunk", data: chunk });
 			}
@@ -123,6 +125,11 @@ class FromBufferSubscription extends FirehoseSubscription {
 		} catch (err) {
 			console.error(err);
 		}
+	}
+
+	override async destroy() {
+		// @ts-expect-error
+		this.destroyed = true;
 	}
 }
 
