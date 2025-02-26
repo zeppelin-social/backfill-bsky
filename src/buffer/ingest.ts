@@ -81,7 +81,7 @@ class FromBufferSubscription extends FirehoseSubscription {
 			const diffKb = Math.abs(this.reader.position - lastPosition) / 1000;
 			console.log(
 				`Buffer progress: ${progress.toFixed(2)}% | ${
-					diffKb.toFixed(2)
+					(diffKb / 10).toFixed(2)
 				}kb/s | pos: ${this.reader.position}`,
 			);
 			lastPosition = this.reader.position;
