@@ -22,7 +22,7 @@ class BufferReader {
 	public bufferSize: number;
 	public position = 0;
 
-	constructor(filename: string) {
+	constructor(filename: string, private readonly startPosition: number) {
 		this.stream = fs.createReadStream(filename);
 		this.bufferSize = fs.statSync(filename).size;
 	}
@@ -31,8 +31,14 @@ class BufferReader {
 		let buffer = Buffer.alloc(0);
 
 		try {
-			for await (const chunk of this.stream) {
-				buffer = Buffer.concat([buffer, chunk as Buffer]);
+			let chunk: Buffer;
+			for await (chunk of this.stream) {
+				if (this.position + chunk.length < this.startPosition) {
+					this.position += chunk.length;
+					continue;
+				}
+
+				buffer = Buffer.concat([buffer, chunk]);
 
 				while (buffer.length >= 4) {
 					const messageLength = buffer.readUInt32LE(0);
@@ -73,7 +79,11 @@ class FromBufferSubscription extends FirehoseSubscription {
 		setInterval(() => {
 			const progress = this.reader.position / this.reader.bufferSize * 100;
 			const diffKb = Math.abs(this.reader.position - lastPosition) / 1000;
-			console.log(`Buffer progress: ${progress.toFixed(2)}% | ${diffKb.toFixed(2)}kb/s`);
+			console.log(
+				`Buffer progress: ${progress.toFixed(2)}% | ${
+					diffKb.toFixed(2)
+				}kb/s | pos: ${this.reader.position}`,
+			);
 			lastPosition = this.reader.position;
 		}, 10_000);
 
@@ -117,7 +127,10 @@ class FromBufferSubscription extends FirehoseSubscription {
 }
 
 async function main() {
-	const reader = new BufferReader("relay.buffer");
+	const startPosition = parseInt(process.argv[2] || "0");
+	if (isNaN(startPosition)) throw new Error("Invalid start position");
+
+	const reader = new BufferReader("relay.buffer", startPosition);
 
 	const indexer = new FromBufferSubscription(reader, {
 		service: "",
