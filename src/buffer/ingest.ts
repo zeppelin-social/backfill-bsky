@@ -69,9 +69,12 @@ class FromBufferSubscription extends FirehoseSubscription {
 	}
 
 	override async start() {
+		let lastPosition = 0;
 		setInterval(() => {
 			const progress = this.reader.position / this.reader.bufferSize * 100;
-			console.log(`Buffer progress: ${progress.toFixed(2)}%`);
+			const diffKb = Math.abs(this.reader.position - lastPosition) / 1000;
+			console.log(`Buffer progress: ${progress.toFixed(2)}% | ${diffKb.toFixed(2)}kb/s`);
+			lastPosition = this.reader.position;
 		}, 10_000);
 
 		try {
