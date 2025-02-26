@@ -146,6 +146,15 @@ async function main() {
 		onError: (err) => console.error(...(err.cause ? [err.message, err.cause] : [err])),
 	});
 
+	const onExit = () => {
+		console.log(`Exiting with position ${reader.position}`);
+		return indexer.destroy();
+	};
+	process.on("SIGINT", onExit);
+	process.on("SIGPIPE", onExit);
+	process.on("SIGTERM", onExit);
+	process.on("beforeExit", onExit);
+
 	return indexer.start();
 }
 
