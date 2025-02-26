@@ -33,11 +33,6 @@ class BufferReader {
 		try {
 			let chunk: Buffer;
 			for await (chunk of this.stream) {
-				if (this.position + chunk.length < this.startPosition) {
-					this.position += chunk.length;
-					continue;
-				}
-
 				buffer = Buffer.concat([buffer, chunk]);
 
 				while (buffer.length >= 4) {
@@ -51,6 +46,11 @@ class BufferReader {
 						// Remove processed data from buffer
 						buffer = buffer.subarray(totalLength);
 						this.position += totalLength;
+
+						// Skip messages before start position
+						if (this.position <= this.startPosition) {
+							continue;
+						}
 
 						yield message;
 					} else {
