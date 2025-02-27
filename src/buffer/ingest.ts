@@ -17,6 +17,8 @@ for (const envVar of ["BSKY_DB_POSTGRES_URL", "BSKY_DB_POSTGRES_SCHEMA", "BSKY_D
 	if (!process.env[envVar]) throw new Error(`Missing env var ${envVar}`);
 }
 
+Buffer.poolSize = 0;
+
 class BufferReader {
 	private stream: Readable;
 	public bufferSize: number;
@@ -26,7 +28,7 @@ class BufferReader {
 		this.bufferSize = fs.statSync(filename).size;
 	}
 
-	async *read(): AsyncGenerator<Uint8Array> {
+	async *read(): AsyncGenerator<Buffer> {
 		let buffer = Buffer.alloc(0);
 
 		try {
@@ -40,10 +42,10 @@ class BufferReader {
 
 					// Check if we have the complete message
 					if (buffer.length >= totalLength) {
-						const message = new Uint8Array(buffer.subarray(4, totalLength));
+						const message = Buffer.from(buffer.subarray(4, totalLength));
 
 						// Remove processed data from buffer
-						buffer = buffer.subarray(totalLength);
+						buffer = Buffer.from(buffer.subarray(totalLength));
 						this.position += totalLength;
 
 						yield message;
