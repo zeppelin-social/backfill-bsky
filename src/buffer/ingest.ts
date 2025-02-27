@@ -17,6 +17,12 @@ for (const envVar of ["BSKY_DB_POSTGRES_URL", "BSKY_DB_POSTGRES_SCHEMA", "BSKY_D
 	if (!process.env[envVar]) throw new Error(`Missing env var ${envVar}`);
 }
 
+// whether to persist and restore position from file
+let useFileState = false;
+if (process.argv.join(" ").includes("--file-state")) {
+	useFileState = true;
+}
+
 Buffer.poolSize = 0;
 
 class BufferReader {
@@ -80,6 +86,7 @@ class FromBufferSubscription extends FirehoseSubscription {
 					(diffKb / 10).toFixed(2)
 				}kb/s | pos: ${this.reader.position}`,
 			);
+			fs.writeFileSync("relay.buffer.pos", this.reader.position.toString());
 			lastPosition = this.reader.position;
 		}, 10_000);
 
@@ -130,8 +137,9 @@ class FromBufferSubscription extends FirehoseSubscription {
 }
 
 async function main() {
-	const startPosition = parseInt(process.argv[2] || "0");
-	if (isNaN(startPosition)) throw new Error("Invalid start position");
+	let startPosition = parseInt(process.argv[2] || "0");
+	if (useFileState) startPosition = parseInt(fs.readFileSync("relay.buffer.pos", "utf-8").trim());
+	if (isNaN(startPosition)) startPosition = 0;
 
 	const reader = new BufferReader("relay.buffer", startPosition);
 
