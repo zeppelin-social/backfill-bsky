@@ -46,6 +46,31 @@ class BufferReader {
 					const messageLength = buffer.readUInt32LE(0);
 					const totalLength = messageLength + 4;
 
+					// If message is obviously broken (>10MB),
+					if (totalLength > 10_000_000) {
+						// skip forward byte by byte until we find what looks like a valid message start
+						let validStart = 1;
+						while (validStart < buffer.length - 4) {
+							const nextLength = buffer.readUInt32LE(validStart);
+							// basic sanity checks for a valid message:
+							// 1. Length should be <10MB
+							// 2. Total message should fit in remaining buffer
+							// 3. First byte of CBOR should be valid
+							if (
+								nextLength < 10_000_000
+								&& validStart + nextLength + 4 <= buffer.length
+								&& (buffer[validStart + 4] & 0xE0) <= 0xA0
+							) {
+								console.warn(`Skipped ${validStart} bytes to next valid message`);
+								buffer = buffer.subarray(validStart);
+								this.position += validStart;
+								break;
+							}
+							validStart++;
+						}
+						continue;
+					}
+
 					// Check if we have the complete message
 					if (buffer.length >= totalLength) {
 						const message = Buffer.from(buffer.subarray(4, totalLength));
