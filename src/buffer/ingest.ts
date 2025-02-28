@@ -86,7 +86,7 @@ class FromBufferSubscription extends FirehoseSubscription {
 					(diffKb / 10).toFixed(2)
 				}kb/s | pos: ${this.reader.position}`,
 			);
-			fs.writeFileSync("relay.buffer.pos", this.reader.position.toString());
+			fs.writeFileSync("relay.buffer.pos", (this.reader.position + 1).toString());
 			lastPosition = this.reader.position;
 		}, 10_000);
 
