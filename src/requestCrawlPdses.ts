@@ -23,7 +23,8 @@ async function main() {
 	await using _enableSubs = await enableSubscriptions(bgs, Authorization) ?? null;
 	await using _increaseLimit = await increaseLimit(bgs, Authorization) ?? null;
 
-	console.log("Requesting crawls...");
+	let crawled = 0;
+	process.stdout.write(`Crawling... ${crawled}/${pdses.length}\r`);
 	await Promise.all(pdses.map(async (url) => {
 		try {
 			const res = await fetch(`${bgs}/admin/pds/requestCrawl`, {
@@ -43,6 +44,9 @@ async function main() {
 			}
 		} catch (err) {
 			console.error(`Network error requesting crawl for ${url.hostname}: ${err}`);
+		} finally {
+			crawled++;
+			process.stdout.write(`Crawling... ${crawled}/${pdses.length}\r`);
 		}
 	}));
 	console.log("Done crawling!");
