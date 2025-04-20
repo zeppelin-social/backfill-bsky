@@ -17,16 +17,15 @@ async function main() {
 	const pdses = (await fetchPdses()).map((url) => new URL(url));
 
 	const bgs = "https://" + process.env.BGS_HOSTNAME;
+	const Authorization = "Basic "
+		+ Buffer.from("admin:" + process.env.BGS_ADMIN_KEY).toString("base64");
 
 	console.log("Requesting crawls...");
 	await Promise.all(pdses.map(async (url) => {
 		try {
 			const res = await fetch(`${bgs}/admin/pds/requestCrawl`, {
 				method: "POST",
-				headers: {
-					"Content-Type": "application/json",
-					Authorization: `Bearer ${process.env.BGS_ADMIN_KEY}`,
-				},
+				headers: { "Content-Type": "application/json", Authorization },
 				body: JSON.stringify({
 					hostname: "https://" + url.hostname,
 					per_second: 200,
