@@ -20,6 +20,9 @@ async function main() {
 	const Authorization = "Basic "
 		+ Buffer.from("admin:" + process.env.BGS_ADMIN_KEY).toString("base64");
 
+	await using _enableSubs = await enableSubscriptions(bgs, Authorization) ?? null;
+	await using _increaseLimit = await increaseLimit(bgs, Authorization) ?? null;
+
 	console.log("Requesting crawls...");
 	await Promise.all(pdses.map(async (url) => {
 		try {
@@ -36,10 +39,7 @@ async function main() {
 				}),
 			});
 			if (!res.ok) {
-				console.error(
-					`Error requesting crawl for ${url.hostname}: ${res.status} ${res.statusText} — ${await res
-						.json().then((r: any) => r?.error || "unknown error")}`,
-				);
+				logErrorRes(res, `Error requesting crawl for ${url.hostname}`);
 			}
 		} catch (err) {
 			console.error(`Network error requesting crawl for ${url.hostname}: ${err}`);
@@ -48,4 +48,85 @@ async function main() {
 	console.log("Done crawling!");
 }
 
+async function enableSubscriptions(
+	bgs: string,
+	Authorization: string,
+): Promise<AsyncDisposable | void> {
+	const enabledRes = await fetch(`${bgs}/admin/subs/getEnabled`, {
+		method: "GET",
+		headers: { "Content-Type": "application/json", Authorization },
+	});
+	if (!enabledRes.ok) {
+		logErrorRes(enabledRes, "Error getting subscriptions enabled status");
+		return;
+	}
+	const { enabled } = await enabledRes.json() as { enabled: boolean };
+
+	if (enabled) {
+		console.log("Subscriptions already enabled");
+		return;
+	}
+
+	const enableRes = await fetch(`${bgs}/admin/subs/setEnabled?enabled=true`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json", Authorization },
+	});
+	if (!enableRes.ok) {
+		logErrorRes(enableRes, "Error enabling subscriptions");
+		return;
+	}
+
+	return {
+		[Symbol.asyncDispose]: async () => {
+			const disableRes = await fetch(`${bgs}/admin/subs/setEnabled?enabled=false`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json", Authorization },
+			});
+			if (!disableRes.ok) {
+				logErrorRes(disableRes, "Error re-disabling subscriptions");
+			}
+		},
+	};
+}
+
+async function increaseLimit(bgs: string, Authorization: string) {
+	const limitRes = await fetch(`${bgs}/admin/subs/perDayLimit`, {
+		method: "GET",
+		headers: { "Content-Type": "application/json", Authorization },
+	});
+	if (!limitRes.ok) {
+		logErrorRes(limitRes, "Error getting per day limit");
+		return;
+	}
+	const { limit } = await limitRes.json() as { limit: number };
+
+	const increaseRes = await fetch(`${bgs}/admin/subs/setPerDayLimit?limit=999999`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json", Authorization },
+	});
+	if (!increaseRes.ok) {
+		logErrorRes(increaseRes, "Error increasing per day limit");
+		return;
+	}
+
+	return {
+		[Symbol.asyncDispose]: async () => {
+			const decreaseRes = await fetch(`${bgs}/admin/subs/setPerDayLimit?limit=${limit}`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json", Authorization },
+			});
+			if (!decreaseRes.ok) {
+				logErrorRes(decreaseRes, "Error resetting per day limit");
+			}
+		},
+	};
+}
+
+function logErrorRes(res: Response, msg: string) {
+	console.error(
+		`${msg}: ${res.status} ${res.statusText} — ${await res.json().then((r: any) =>
+			r?.error || "unknown error"
+		)}`,
+	);
+}
 void main();
