@@ -30,12 +30,17 @@ declare global {
 			BSKY_DB_POSTGRES_URL: string;
 			BSKY_DB_POSTGRES_SCHEMA: string;
 			BSKY_DID_PLC_URL: string;
+			FALLBACK_PLC_URL?: string;
 		}
 	}
 }
 
 for (const envVar of ["BSKY_DB_POSTGRES_URL", "BSKY_DB_POSTGRES_SCHEMA", "BSKY_DID_PLC_URL"]) {
 	if (!process.env[envVar]) throw new Error(`Missing env var ${envVar}`);
+}
+
+for (const envVar of ["FALLBACK_PLC_URL"]) {
+	if (!process.env[envVar]) console.warn(`Missing optional env var ${envVar}`);
 }
 
 const DB_SETTINGS = { archive_mode: "off", wal_level: "minimal", max_wal_senders: 0, fsync: "off" };

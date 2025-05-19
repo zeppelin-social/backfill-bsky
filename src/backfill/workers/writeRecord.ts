@@ -1,10 +1,11 @@
-import { IdResolver, MemoryCache } from "@atproto/identity";
+import { MemoryCache } from "@atproto/identity";
 import { AtUri } from "@atproto/syntax";
 import { BackgroundQueue, Database } from "@futuristick/atproto-bsky";
 import { IndexingService } from "@futuristick/atproto-bsky/dist/data-plane/server/indexing";
 import { CID } from "multiformats/cid";
 import type { CommitMessage } from "./repo.js";
-import { convertBlobRefs, type ToInsertCommit } from "./writeCollection";
+import { jsonToLex, type ToInsertCommit } from "./writeCollection.js";
+import { IdResolver } from '../indexingService.js'
 
 export async function writeRecordWorker() {
 	console.info(`Starting write record worker`);
@@ -18,6 +19,7 @@ export async function writeRecordWorker() {
 
 	const idResolver = new IdResolver({
 		plcUrl: process.env.BSKY_DID_PLC_URL,
+		fallbackPlc: process.env.FALLBACK_PLC_URL,
 		didCache: new MemoryCache(),
 	});
 
@@ -42,14 +44,12 @@ export async function writeRecordWorker() {
 		}
 
 		for (const commit of msg.commits) {
-			const { uri, cid, timestamp, obj } = commit;
-			if (!uri || !cid || !timestamp || !obj) {
+			const { uri, cid, timestamp, obj: _obj } = commit;
+			if (!uri || !cid || !timestamp || !_obj) {
 				throw new Error(`Invalid commit data ${JSON.stringify(commit)}`);
 			}
 
-			// The appview IndexingService does lex validation on the record, which only accepts blob refs in the
-			// form of a BlobRef instance, so we need to do this expensive iteration over every single record
-			convertBlobRefs(obj);
+			const obj = jsonToLex(_obj as Record<string, unknown>);
 
 			queue.push({ uri: new AtUri(uri), cid: CID.parse(cid), timestamp, obj });
 		}

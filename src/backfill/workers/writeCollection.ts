@@ -1,27 +1,29 @@
-import { IdResolver, MemoryCache } from "@atproto/identity";
+import { MemoryCache } from "@atproto/identity";
 import { BlobRef } from "@atproto/lexicon";
 import { AtUri } from "@atproto/syntax";
 import { BackgroundQueue, Database } from "@futuristick/atproto-bsky";
 import { IndexingService } from "@futuristick/atproto-bsky/dist/data-plane/server/indexing/index";
 import { CID } from "multiformats/cid";
 import type { CommitMessage } from "./repo.js";
+import { IdResolver } from '../indexingService.js'
 
 export type ToInsertCommit = { uri: AtUri; cid: CID; timestamp: string; obj: unknown };
 
-// 3 write workers, each handles 5 record types
-// picked largely based on vibes to kind of evenly distribute load
+// 3 write workers, picked largely based on vibes to kind of evenly distribute load
 export const writeWorkerAllocations = [[
 	"app.bsky.feed.post",
 	"chat.bsky.actor.declaration",
 	"app.bsky.feed.postgate",
 	"app.bsky.labeler.service",
 	"app.bsky.feed.generator",
+	"app.bsky.actor.status",
 ], [
 	"app.bsky.feed.like",
 	"app.bsky.actor.profile",
 	"app.bsky.graph.list",
 	"app.bsky.graph.block",
 	"app.bsky.graph.starterpack",
+	"app.bsky.graph.verification",
 ], [
 	"app.bsky.feed.threadgate",
 	"app.bsky.feed.repost",
@@ -43,12 +45,12 @@ export async function writeCollectionWorker() {
 		poolSize: 50,
 		poolIdleTimeoutMs: 60_000,
 	});
-
+	
 	const idResolver = new IdResolver({
 		plcUrl: process.env.BSKY_DID_PLC_URL,
+		fallbackPlc: process.env.FALLBACK_PLC_URL,
 		didCache: new MemoryCache(),
 	});
-
 	const indexingSvc = new IndexingService(db, idResolver, new BackgroundQueue(db));
 
 	const queues: Record<string, ToInsertCommit[]> = {};
@@ -82,14 +84,12 @@ export async function writeCollectionWorker() {
 		}
 
 		for (const commit of msg.commits) {
-			const { uri, cid, timestamp, obj } = commit;
-			if (!uri || !cid || !timestamp || !obj) {
+			const { uri, cid, timestamp, obj: _obj } = commit;
+			if (!uri || !cid || !timestamp || !_obj) {
 				throw new Error(`Invalid commit data ${JSON.stringify(commit)}`);
 			}
 
-			// The appview IndexingService does lex validation on the record, which only accepts blob refs in the
-			// form of a BlobRef instance, so we need to do this expensive iteration over every single record
-			convertBlobRefs(obj);
+			const obj = jsonToLex(_obj as Record<string, unknown>);
 
 			queues[msg.collection].push({
 				uri: new AtUri(uri),
@@ -151,40 +151,52 @@ export async function writeCollectionWorker() {
 	}
 }
 
-export function convertBlobRefs(obj: unknown): unknown {
-	if (!obj) return obj;
-	if (Array.isArray(obj)) {
-		for (let i = 0; i < obj.length; i++) {
-			obj[i] = convertBlobRefs(obj[i]);
+export function jsonToLex(val: Record<string, unknown>): unknown {
+	try {
+		// walk arrays
+		if (Array.isArray(val)) {
+			return val.map((item) => jsonToLex(item));
 		}
-	} else if (typeof obj === "object") {
-		const record = obj as Record<string, any>;
-
-		// weird-ish formulation but faster than for-in or Object.entries
-		const keys = Object.keys(record);
-		let i = keys.length;
-		while (i--) {
-			const key = keys[i];
-			const value = record[key];
-			if (typeof value === "object" && value !== null) {
-				if (value.$type === "blob") {
-					try {
-						const cidLink = CID.parse(value.ref.$link);
-						record[key] = new BlobRef(cidLink, value.mimeType, value.size);
-					} catch {
-						console.warn(
-							`Failed to parse CID ${value.ref.$link}\nRecord: ${
-								JSON.stringify(record)
-							}`,
-						);
-						return record;
-					}
+		// objects
+		if (val && typeof val === "object") {
+			// check for dag json values
+			if (
+				"$link" in val && typeof val["$link"] === "string" && Object.keys(val).length === 1
+			) {
+				return CID.parse(val["$link"]);
+			}
+			if ("bytes" in val && val["bytes"] instanceof Uint8Array) {
+				return CID.decode(val.bytes);
+			}
+			if (
+				val["$type"] === "blob"
+				|| (typeof val["cid"] === "string" && typeof val["mimeType"] === "string")
+			) {
+				if ("ref" in val && typeof val["size"] === "number") {
+					return new BlobRef(
+						CID.decode((val.ref as any).bytes),
+						val.mimeType as string,
+						val.size,
+					);
 				} else {
-					convertBlobRefs(value);
+					return new BlobRef(
+						CID.parse(val.cid as string),
+						val.mimeType as string,
+						-1,
+						val as never,
+					);
 				}
 			}
+			// walk plain objects
+			const toReturn: Record<string, unknown> = {};
+			for (const key of Object.keys(val)) {
+				// @ts-expect-error — indexed access
+				toReturn[key] = jsonToLex(val[key]);
+			}
+			return toReturn;
 		}
+	} catch {
+		// pass through
 	}
-
-	return obj;
+	return val;
 }
