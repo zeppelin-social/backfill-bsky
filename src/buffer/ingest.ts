@@ -1,7 +1,7 @@
-import { FirehoseSubscription, type FirehoseSubscriptionOptions } from "@futuristick/bsky-indexer";
+import { FirehoseSubscription, type FirehoseSubscriptionOptions } from "@futur/bsky-indexer";
 import fs from "node:fs";
 import type { Readable } from "node:stream";
-import type { Worker } from "node:worker_threads";
+import { setTimeout as sleep } from "node:timers/promises";
 
 declare global {
 	namespace NodeJS {
@@ -21,6 +21,11 @@ for (const envVar of ["BSKY_DB_POSTGRES_URL", "BSKY_DB_POSTGRES_SCHEMA", "BSKY_D
 let useFileState = false;
 if (process.argv.join(" ").includes("--file-state")) {
 	useFileState = true;
+}
+
+let maxPerSecond = 2500;
+if (process.argv.join(" ").includes("--max-per-second")) {
+	maxPerSecond = parseInt(process.argv[process.argv.indexOf("--max-per-second") + 1]);
 }
 
 Buffer.poolSize = 0;
@@ -116,36 +121,28 @@ class FromBufferSubscription extends FirehoseSubscription {
 		}, 10_000);
 
 		try {
+			let messagesSinceTimeout = 0;
 			for await (const chunk of this.reader.read()) {
-				// @ts-expect-error
-				if (this.destroyed) break;
-				// @ts-expect-error
-				const worker = await this.getNextWorker();
-				worker.postMessage({ type: "chunk", data: chunk });
+				messagesSinceTimeout++;
+				void this.onMessage({ data: chunk } as MessageEvent<ArrayBuffer>);
+				if (messagesSinceTimeout >= (maxPerSecond / 10)) {
+					messagesSinceTimeout = 0;
+					await sleep(100);
+				}
 			}
 
-			// @ts-expect-error
-			const workers: Worker[] = this.workers;
-			let remainingWorkers = workers.length;
+			// Kill ingest after 10 seconds of inactivity
+			const destroyTimeout = setTimeout(() => {
+				console.log("Buffer ingest complete");
+				void this.destroy();
+			}, 10_000);
+			const onProcessed = this.onProcessed;
+			this.onProcessed = (res) => {
+				onProcessed(res);
+				destroyTimeout.refresh();
+			};
 
-			workers.forEach((worker: Worker, i: number) => {
-				// Kill each worker after 20 seconds without a message
-				const timeout = setTimeout(() => {
-					console.warn(`Worker ${i} timed out`);
-					worker.terminate();
-
-					remainingWorkers--;
-					if (remainingWorkers === 0) {
-						process.exit();
-					}
-				}, 20_000);
-
-				worker.on("message", () => {
-					timeout.refresh();
-				});
-			});
-
-			// Kill all workers after 300 seconds
+			// Kill all workers after 300 seconds regardless of activity
 			setTimeout(() => {
 				console.warn("All workers timed out");
 				process.exit();
@@ -172,7 +169,7 @@ async function main() {
 		service: "",
 		// Keep low to avoid deadlock
 		minWorkers: 4,
-		maxWorkers: 4,
+		maxWorkers: 8,
 		idResolverOptions: { plcUrl: process.env.BSKY_DID_PLC_URL },
 		dbOptions: {
 			url: process.env.BSKY_DB_POSTGRES_URL,
