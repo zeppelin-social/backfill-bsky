@@ -1,6 +1,10 @@
 import { FirehoseSubscription, type FirehoseSubscriptionOptions } from "@futur/bsky-indexer";
+import { Buffer } from "node:buffer";
+import console from "node:console";
 import fs from "node:fs";
+import process from "node:process";
 import type { Readable } from "node:stream";
+import { setInterval, setTimeout } from "node:timers";
 import { setTimeout as sleep } from "node:timers/promises";
 
 declare global {
@@ -23,6 +27,7 @@ if (process.argv.join(" ").includes("--file-state")) {
 	useFileState = true;
 }
 
+// maximum number of messages to read per second
 let maxPerSecond = 2500;
 if (process.argv.join(" ").includes("--max-per-second")) {
 	maxPerSecond = parseInt(process.argv[process.argv.indexOf("--max-per-second") + 1]);
@@ -124,7 +129,7 @@ class FromBufferSubscription extends FirehoseSubscription {
 			let messagesSinceTimeout = 0;
 			for await (const chunk of this.reader.read()) {
 				messagesSinceTimeout++;
-				void this.onMessage({ data: chunk } as MessageEvent<ArrayBuffer>);
+				void this.onMessage({ data: chunk });
 				if (messagesSinceTimeout >= (maxPerSecond / 10)) {
 					messagesSinceTimeout = 0;
 					await sleep(100);
@@ -150,11 +155,6 @@ class FromBufferSubscription extends FirehoseSubscription {
 		} catch (err) {
 			console.error(err);
 		}
-	}
-
-	override async destroy() {
-		// @ts-expect-error
-		this.destroyed = true;
 	}
 }
 

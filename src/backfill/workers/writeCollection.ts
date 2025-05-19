@@ -4,8 +4,8 @@ import { AtUri } from "@atproto/syntax";
 import { BackgroundQueue, Database } from "@futuristick/atproto-bsky";
 import { IndexingService } from "@futuristick/atproto-bsky/dist/data-plane/server/indexing/index";
 import { CID } from "multiformats/cid";
+import { IdResolver } from "../indexingService.js";
 import type { CommitMessage } from "./repo.js";
-import { IdResolver } from '../indexingService.js'
 
 export type ToInsertCommit = { uri: AtUri; cid: CID; timestamp: string; obj: unknown };
 
@@ -45,7 +45,7 @@ export async function writeCollectionWorker() {
 		poolSize: 50,
 		poolIdleTimeoutMs: 60_000,
 	});
-	
+
 	const idResolver = new IdResolver({
 		plcUrl: process.env.BSKY_DID_PLC_URL,
 		fallbackPlc: process.env.FALLBACK_PLC_URL,

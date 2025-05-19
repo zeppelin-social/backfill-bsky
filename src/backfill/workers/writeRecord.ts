@@ -3,9 +3,9 @@ import { AtUri } from "@atproto/syntax";
 import { BackgroundQueue, Database } from "@futuristick/atproto-bsky";
 import { IndexingService } from "@futuristick/atproto-bsky/dist/data-plane/server/indexing";
 import { CID } from "multiformats/cid";
+import { IdResolver } from "../indexingService.js";
 import type { CommitMessage } from "./repo.js";
 import { jsonToLex, type ToInsertCommit } from "./writeCollection.js";
-import { IdResolver } from '../indexingService.js'
 
 export async function writeRecordWorker() {
 	console.info(`Starting write record worker`);

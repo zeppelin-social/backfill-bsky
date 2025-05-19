@@ -14,3 +14,4 @@ yarn-error.log
 *.swp
 dist/
 relay-buffer.jsonl
+deno.lock

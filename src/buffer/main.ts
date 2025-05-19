@@ -1,5 +1,8 @@
 import { FirehoseSubscription, type FirehoseSubscriptionOptions } from "@futur/bsky-indexer";
+import { Buffer } from "node:buffer";
+import console from "node:console";
 import * as fs from "node:fs";
+import process from "node:process";
 
 declare global {
 	namespace NodeJS {
@@ -13,15 +16,23 @@ for (const envVar of ["BUFFER_REPO_PROVIDER"]) {
 	if (!process.env[envVar]) throw new Error(`Missing env var ${envVar}`);
 }
 
+// initial cursor
+let initialCursor: number | undefined = 0;
+if (process.argv.join(" ").includes("--cursor")) {
+	const cursor = process.argv[process.argv.indexOf("--cursor")];
+	initialCursor = cursor === "latest" ? undefined : parseInt(cursor);
+}
+
 class ToBufferSubscription extends FirehoseSubscription {
 	private stream: fs.WriteStream;
 
 	constructor(opts: Omit<FirehoseSubscriptionOptions, "dbOptions">, filename: string) {
 		super({
 			...opts,
-			minWorkers: 0,
-			maxWorkers: 1,
+			minWorkers: 1,
+			maxWorkers: 2,
 			dbOptions: { url: "" },
+			idResolverOptions: {},
 			statsFrequencyMs: 0,
 		});
 
@@ -30,7 +41,7 @@ class ToBufferSubscription extends FirehoseSubscription {
 		process.on("exit", () => this.stream.close());
 	}
 
-	override onMessage = async ({ data }: MessageEvent<ArrayBuffer>) => {
+	override onMessage = async ({ data }: { data: ArrayBuffer }) => {
 		const chunk = new Uint8Array(data);
 		this.stream.write(Buffer.from(chunk));
 	};
@@ -41,7 +52,7 @@ function main() {
 
 	const sub = new ToBufferSubscription({
 		service: process.env.BUFFER_REPO_PROVIDER,
-		cursor: 0,
+		...(initialCursor ? { cursor: initialCursor } : {}),
 		onError: (err) => console.error(...(err.cause ? [err.message, err.cause] : [err])),
 	}, filename);
 

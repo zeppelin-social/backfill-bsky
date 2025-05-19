@@ -1,8 +1,13 @@
-import { IdResolver as _IdResolver, type IdentityResolverOpts, DidResolver, type DidResolverOpts } from "@atproto/identity";
+import {
+	DidResolver,
+	type DidResolverOpts,
+	type IdentityResolverOpts,
+	IdResolver as _IdResolver,
+} from "@atproto/identity";
 import { IndexingService as IdxService } from "@futuristick/atproto-bsky/dist/data-plane/server/indexing";
 import { copyIntoTable } from "@futuristick/atproto-bsky/dist/data-plane/server/util";
-import PQueue from "p-queue";
 import { setTimeout as sleep } from "node:timers/promises";
+import PQueue from "p-queue";
 
 export class IndexingService extends IdxService {
 	async indexActorsBulk(dids: Array<string>): Promise<void> {
@@ -19,7 +24,7 @@ export class IndexingService extends IdxService {
 				const handle = did === handleToDid ? atpData.handle.toLowerCase() : null;
 				if (handle) actors.push({ did, handle, indexedAt: now });
 			} catch (err) {
-				if (err instanceof Error && 'status' in err && err.status === 429) aborted = true;
+				if (err instanceof Error && "status" in err && err.status === 429) aborted = true;
 			}
 		}));
 		if (aborted) {
@@ -32,12 +37,13 @@ export class IndexingService extends IdxService {
 }
 
 export class IdResolver extends _IdResolver {
-	constructor({ fallbackPlc, ...opts }: IdentityResolverOpts & { fallbackPlc?: string | undefined }) {
+	constructor(
+		{ fallbackPlc, ...opts }: IdentityResolverOpts & { fallbackPlc?: string | undefined },
+	) {
 		super(opts);
 		if (fallbackPlc) this.did = new FallbackPlcDidResolver({ ...opts, fallbackPlc });
 	}
 }
-
 
 class FallbackPlcDidResolver extends DidResolver {
 	constructor({ fallbackPlc, ...opts }: DidResolverOpts & { fallbackPlc: string }) {

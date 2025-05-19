@@ -1,0 +1,19 @@
+{
+  // keep in sync with @futur/bsky-indexer deps; needed for buffer
+  "imports": {
+    "@atcute/atproto": "npm:@atcute/atproto@^3.0.1",
+    "@atcute/car": "npm:@atcute/car@^3.0.3",
+    "@atcute/cbor": "npm:@atcute/cbor@^2.2.3",
+    "@atproto/bsky": "npm:@atproto/bsky@^0.0.149",
+    "@atproto/identity": "npm:@atproto/identity@^0.4.8",
+    "@atproto/lexicon": "npm:@atproto/lexicon@^0.4.11",
+    "@atproto/repo": "npm:@atproto/repo@^0.8.1",
+    "@atproto/syntax": "npm:@atproto/syntax@^0.4.0",
+    "@jsr/poolifier__poolifier-web-worker": "jsr:@poolifier/poolifier-web-worker@^0.4.31",
+    "@redis/client": "npm:@redis/client@^1.6.0",
+    "multiformats": "npm:multiformats@9.9.0",
+    "partysocket": "npm:partysocket@^1.1.4"
+  },
+  "nodeModulesDir": "auto",
+  "unstable": ["worker-options"]
+}
