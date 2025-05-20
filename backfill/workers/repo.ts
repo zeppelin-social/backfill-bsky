@@ -10,15 +10,20 @@ export type CommitData = { uri: string; cid: string; timestamp: string; obj: unk
 export type CommitMessage = { type: "commit"; collection: string; commits: CommitData[] };
 
 export async function repoWorker() {
-	if (!process.env.REPOS_DIR) throw new Error("Missing env var REPOS_DIR");
+	for (const envVar of ["REPOS_DIR", "REDIS_URL"]) {
+		if (!process.env[envVar]) {
+			throw new Error(`Repo worker missing env var ${envVar}`);
+		}
+	}
+
+	const redis = createClient({ url: process.env.REDIS_URL });
+	await redis.connect();
 
 	const queue = new Queue<{ did: string }>("repo-processing", {
 		removeOnSuccess: true,
 		removeOnFailure: true,
+		redis,
 	});
-
-	const redis = createClient();
-	await redis.connect();
 
 	let commitData: Record<string, CommitData[]> = {};
 

@@ -4,7 +4,7 @@ import {
 	type FirehoseSubscriptionOptions,
 } from "@futur/bsky-indexer";
 import { TextLineStream } from "@std/streams/text-line-stream";
-import { Buffer, Blob } from "node:buffer";
+import { Blob, Buffer } from "node:buffer";
 import console from "node:console";
 import { readFileSync, writeFileSync } from "node:fs";
 import process from "node:process";

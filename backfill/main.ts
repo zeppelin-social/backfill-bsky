@@ -27,7 +27,7 @@ type WorkerMessage = CommitMessage | { type: "shutdownComplete" };
 declare global {
 	namespace NodeJS {
 		interface ProcessEnv {
-		  REDIS_URL: string;
+			REDIS_URL: string;
 			BSKY_DB_POSTGRES_URL: string;
 			BSKY_DB_POSTGRES_SCHEMA: string;
 			BSKY_DID_PLC_URL: string;
@@ -36,7 +36,14 @@ declare global {
 	}
 }
 
-for (const envVar of ["REDIS_URL", "BSKY_DB_POSTGRES_URL", "BSKY_DB_POSTGRES_SCHEMA", "BSKY_DID_PLC_URL"]) {
+for (
+	const envVar of [
+		"REDIS_URL",
+		"BSKY_DB_POSTGRES_URL",
+		"BSKY_DB_POSTGRES_SCHEMA",
+		"BSKY_DID_PLC_URL",
+	]
+) {
 	if (!process.env[envVar]) throw new Error(`Missing env var ${envVar}`);
 }
 
@@ -83,11 +90,6 @@ setGlobalDispatcher(
 	),
 );
 
-const queue = new Queue<{ did: string }>("repo-processing", {
-	removeOnSuccess: true,
-	removeOnFailure: true,
-});
-
 if (cluster.isWorker) {
 	if (process.env.WORKER_KIND === "repo") {
 		void repoWorker();
@@ -113,6 +115,12 @@ if (cluster.isWorker) {
 
 	const redis = createClient({ url: process.env.REDIS_URL });
 	await redis.connect();
+
+	const queue = new Queue<{ did: string }>("repo-processing", {
+		removeOnSuccess: true,
+		removeOnFailure: true,
+		redis,
+});
 
 	const REPOS_DIR = await fs.mkdtemp(path.join(os.tmpdir(), "backfill-bsky-repos-"));
 
@@ -176,13 +184,17 @@ if (cluster.isWorker) {
 
 	// Initialize repo workers
 	const spawnRepoWorker = () => {
-		const worker = cluster.fork({ WORKER_KIND: "repo", REPOS_DIR });
+		const worker = cluster.fork({
+			WORKER_KIND: "repo",
+			REPOS_DIR,
+			REDIS_URL: process.env.REDIS_URL,
+		});
 		if (!worker.process?.pid) throw new Error("Worker process not found");
 		workers.repo[worker.process.pid] = { kind: "repo" };
 		worker.on("error", (err) => {
 			console.error(`Repo worker error: ${err}`);
 			worker.kill();
-			cluster.fork({ WORKER_KIND: "repo", REPOS_DIR });
+			cluster.fork({ WORKER_KIND: "repo", REPOS_DIR, REDIS_URL: process.env.REDIS_URL });
 		});
 	};
 
