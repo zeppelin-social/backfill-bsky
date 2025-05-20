@@ -8,7 +8,7 @@
 		"quoteProps": "asNeeded"
 	},
 	"json": {},
-	"includes": ["./src/**/*.ts", "./*.json"],
+	"includes": ["./backfill/**/*.ts", "./buffer/**/*.ts", "./scripts/**/*.ts", "./*.json"],
 	"plugins": [
 		"https://plugins.dprint.dev/typescript-0.88.1.wasm",
 		"https://plugins.dprint.dev/json-0.17.4.wasm"

@@ -1,5 +1,5 @@
 {
-  // keep in sync with @futur/bsky-indexer deps; needed for buffer
+  // keep in sync with @futur/bsky-indexer deps
   "imports": {
     "@atcute/atproto": "npm:@atcute/atproto@^3.0.1",
     "@atcute/car": "npm:@atcute/car@^3.0.3",
@@ -13,9 +13,9 @@
     "@jsr/poolifier__poolifier-web-worker": "jsr:@poolifier/poolifier-web-worker@^0.4.31",
     "@redis/client": "npm:@redis/client@^1.6.0",
     "@std/streams": "jsr:@std/streams@^1.0.9",
+    "@types/node": "npm:@types/node@^22.15.19",
     "multiformats": "npm:multiformats@9.9.0",
-    "partysocket": "npm:partysocket@^1.1.4",
+    "partysocket": "npm:partysocket@^1.1.4"
   },
-  "nodeModulesDir": "auto",
-  "unstable": ["worker-options"],
+  "unstable": ["worker-options"]
 }

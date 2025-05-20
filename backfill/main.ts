@@ -17,10 +17,10 @@ import * as os from "node:os";
 import path from "node:path";
 import PQueue from "p-queue";
 import { Agent, RetryAgent, setGlobalDispatcher } from "undici";
-import { sleep } from "../util/fetch.js";
+import { sleep } from "./util/fetch.js";
 import { type CommitMessage, repoWorker } from "./workers/repo.js";
 import { writeCollectionWorker, writeWorkerAllocations } from "./workers/writeCollection.js";
-import { writeRecordWorker } from "./workers/writeRecord";
+import { writeRecordWorker } from "./workers/writeRecord.js";
 
 type WorkerMessage = CommitMessage | { type: "shutdownComplete" };
 

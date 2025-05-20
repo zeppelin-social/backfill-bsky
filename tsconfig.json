@@ -25,7 +25,7 @@
 		"strict": true,
 
 		"outDir": "dist",
-		"rootDir": "src"
+		"rootDir": "backfill"
 	},
-	"include": ["./src/**/*.ts"]
+	"include": ["./backfill/**/*.ts", "./scripts/**/*.ts"]
 }
