@@ -1,9 +1,9 @@
 import { MemoryCache } from "@atproto/identity";
 import { AtUri } from "@atproto/syntax";
 import { BackgroundQueue, Database } from "@futuristick/atproto-bsky";
-import { IndexingService } from "@futuristick/atproto-bsky/dist/data-plane/server/indexing";
 import { CID } from "multiformats/cid";
-import { IdResolver } from "../indexingService.js";
+import PQueue from "p-queue";
+import { IdResolver, IndexingService } from "../indexingService.js";
 import type { CommitMessage } from "./repo.js";
 import { jsonToLex, type ToInsertCommit } from "./writeCollection.js";
 
@@ -25,9 +25,13 @@ export async function writeRecordWorker() {
 
 	const indexingSvc = new IndexingService(db, idResolver, new BackgroundQueue(db));
 
-	let queue: ToInsertCommit[] = [];
+	let toIndexRecords: ToInsertCommit[] = [];
 
-	let queueTimer = setTimeout(processQueue, 500);
+	let recordQueueTimer = setTimeout(processRecordQueue, 500);
+
+	const seenDids = new Set<string>();
+	const toIndexDids = new Set<string>();
+	const indexActorQueue = new PQueue({ concurrency: 1 });
 
 	let isShuttingDown = false;
 
@@ -44,19 +48,27 @@ export async function writeRecordWorker() {
 		}
 
 		for (const commit of msg.commits) {
-			const { uri, cid, timestamp, obj: _obj } = commit;
-			if (!uri || !cid || !timestamp || !_obj) {
+			const { uri: _uri, cid: _cid, timestamp, obj: _obj } = commit;
+			if (!_uri || !_cid || !timestamp || !_obj) {
 				throw new Error(`Invalid commit data ${JSON.stringify(commit)}`);
 			}
 
+			const uri = new AtUri(_uri);
+			const cid = CID.parse(_cid);
 			const obj = jsonToLex(_obj as Record<string, unknown>);
 
-			queue.push({ uri: new AtUri(uri), cid: CID.parse(cid), timestamp, obj });
+			toIndexRecords.push({ uri, cid, timestamp, obj });
+
+			const did = uri.host;
+			if (!seenDids.has(did)) {
+				toIndexDids.add(did);
+				seenDids.add(did);
+			}
 		}
 
-		if (queue.length > 200_000) {
-			clearTimeout(queueTimer);
-			queueTimer = setImmediate(processQueue);
+		if (toIndexRecords.length > 200_000) {
+			clearTimeout(recordQueueTimer);
+			recordQueueTimer = setImmediate(processRecordQueue);
 		}
 	});
 
@@ -67,15 +79,25 @@ export async function writeRecordWorker() {
 	process.on("SIGTERM", handleShutdown);
 	process.on("SIGINT", handleShutdown);
 
-	async function processQueue() {
+	async function processRecordQueue() {
 		if (!isShuttingDown) {
-			queueTimer = setTimeout(processQueue, 500);
+			recordQueueTimer = setTimeout(processRecordQueue, 500);
 		}
 
-		const time = `Writing records: ${queue.length}`;
+		const time = `Writing records: ${toIndexRecords.length}`;
 
-		const records = [...queue];
-		queue = [];
+		void indexActorQueue.add(async () => {
+			const time = `Indexing actors: ${toIndexDids.size}`;
+			console.time(time);
+			indexingSvc.indexActorsBulk([...toIndexDids]);
+			console.timeEnd(time);
+		}).catch((e) => {
+			console.error(`Error while indexing actors: ${e}`);
+		});
+		toIndexDids.clear();
+
+		const records = [...toIndexRecords];
+		toIndexRecords = [];
 
 		try {
 			if (records.length > 0) {
@@ -92,7 +114,7 @@ export async function writeRecordWorker() {
 	async function handleShutdown() {
 		console.log("Write record worker received shutdown signal");
 		isShuttingDown = true;
-		await processQueue();
+		await processRecordQueue();
 		process.send?.({ type: "shutdownComplete" });
 		process.exit(0);
 	}
