@@ -2,9 +2,8 @@ import { MemoryCache } from "@atproto/identity";
 import { BlobRef } from "@atproto/lexicon";
 import { AtUri } from "@atproto/syntax";
 import { BackgroundQueue, Database } from "@futuristick/atproto-bsky";
-import { IndexingService } from "@futuristick/atproto-bsky/dist/data-plane/server/indexing/index";
 import { CID } from "multiformats/cid";
-import { IdResolver } from "../indexingService.js";
+import { IdResolver, IndexingService } from "../indexingService.js";
 import type { CommitMessage } from "./repo.js";
 
 export type ToInsertCommit = { uri: AtUri; cid: CID; timestamp: string; obj: unknown };
