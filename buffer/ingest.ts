@@ -122,7 +122,7 @@ class FromBufferSubscription extends FirehoseSubscription {
 async function main() {
 	let startPosition = parseInt(process.argv[2] || "0");
 	if (useFileState) {
-		startPosition = parseInt(fs.readFileSync("relay-buffer.pos", "utf-8").trim());
+		startPosition = parseInt(readFileSync("relay-buffer.pos", "utf-8").trim());
 	}
 	if (isNaN(startPosition)) startPosition = 0;
 

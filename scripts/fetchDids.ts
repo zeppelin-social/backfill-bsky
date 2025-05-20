@@ -1,9 +1,9 @@
 import { PackrStream } from "msgpackr";
-import fs from "node:fs";
-import { fetchAllDids } from "./util/fetch";
+import { createWriteStream } from "node:fs";
+import { fetchAllDids } from "../backfill/util/fetch.js";
 
 const stream = new PackrStream();
-stream.pipe(fs.createWriteStream("dids.cache"));
+stream.pipe(createWriteStream("dids.cache"));
 
 const count = await fetchAllDids((did, pds) => stream.write([did, pds]));
 stream.end();

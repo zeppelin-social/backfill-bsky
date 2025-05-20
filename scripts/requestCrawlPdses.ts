@@ -1,4 +1,4 @@
-import { fetchPdses } from "./util/fetch.js";
+import { fetchPdses } from "../backfill/util/fetch.js";
 
 declare global {
 	namespace NodeJS {

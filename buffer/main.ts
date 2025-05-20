@@ -5,7 +5,7 @@ import {
 	type FirehoseSubscriptionOptions,
 } from "@futur/bsky-indexer";
 import console from "node:console";
-import * as fs from "node:fs";
+import { createWriteStream, type WriteStream } from "node:fs";
 import process from "node:process";
 
 declare global {
@@ -28,7 +28,7 @@ if (process.argv.join(" ").includes("--cursor")) {
 }
 
 class ToBufferSubscription extends FirehoseSubscription {
-	private stream: fs.WriteStream;
+	private stream: WriteStream;
 
 	constructor(opts: Omit<FirehoseSubscriptionOptions, "dbOptions">, filename: string) {
 		super({
@@ -40,7 +40,7 @@ class ToBufferSubscription extends FirehoseSubscription {
 			statsFrequencyMs: 0,
 		}, new URL("./dummyWorker.ts", import.meta.url));
 
-		this.stream = fs.createWriteStream(filename, { flags: "a" });
+		this.stream = createWriteStream(filename, { flags: "a" });
 		process.on("exit", () => this.stream.close());
 	}
 

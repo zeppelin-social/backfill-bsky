@@ -1,5 +1,5 @@
 import { Database } from "@futuristick/atproto-bsky";
-import fs from "node:fs";
+import { writeFileSync } from "node:fs";
 
 const db = new Database({
 	url: process.env.BSKY_DB_POSTGRES_URL,
@@ -21,4 +21,4 @@ await Promise.all(indexes.rows.map(({ dropcmd }) => db.pool.query(dropcmd)));
 
 const create = indexes.rows.map(({ createcmd }) => createcmd).join(";\n");
 console.log(create);
-fs.writeFileSync("create.sql", create);
+writeFileSync("create.sql", create);
