@@ -1,9 +1,13 @@
-import { FirehoseSubscription, type FirehoseSubscriptionOptions } from "@futur/bsky-indexer";
+import {
+	FirehoseSubscription,
+	FirehoseSubscriptionError,
+	type FirehoseSubscriptionOptions,
+} from "@futur/bsky-indexer";
+import { TextLineStream } from "@std/streams/text-line-stream";
 import { Buffer } from "node:buffer";
 import console from "node:console";
-import fs from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import process from "node:process";
-import type { Readable } from "node:stream";
 import { setInterval, setTimeout } from "node:timers";
 import { setTimeout as sleep } from "node:timers/promises";
 
@@ -35,105 +39,51 @@ if (process.argv.join(" ").includes("--max-per-second")) {
 
 Buffer.poolSize = 0;
 
-class BufferReader {
-	private stream: Readable;
-	public bufferSize: number;
-
-	constructor(filename: string, public position = 0) {
-		this.stream = fs.createReadStream(filename, { start: Math.max(0, position - 1) });
-		this.bufferSize = fs.statSync(filename).size;
-	}
-
-	async *read(): AsyncGenerator<Buffer> {
-		let buffer = Buffer.alloc(0);
-
-		try {
-			let chunk: Buffer;
-			for await (chunk of this.stream) {
-				buffer = Buffer.concat([buffer, chunk]);
-
-				while (buffer.length >= 4) {
-					const messageLength = buffer.readUInt32LE(0);
-					const totalLength = messageLength + 4;
-
-					// If message is obviously broken (>10MB),
-					if (totalLength > 10_000_000) {
-						// skip forward byte by byte until we find what looks like a valid message start
-						let validStart = 1;
-						while (validStart < buffer.length - 4) {
-							const nextLength = buffer.readUInt32LE(validStart);
-							// basic sanity checks for a valid message:
-							// 1. Length should be <10MB
-							// 2. Total message should fit in remaining buffer
-							// 3. First byte of CBOR should be valid
-							if (
-								nextLength < 10_000_000
-								&& validStart + nextLength + 4 <= buffer.length
-								&& (buffer[validStart + 4] & 0xE0) <= 0xA0
-							) {
-								console.warn(`Skipped ${validStart} bytes to next valid message`);
-								buffer = buffer.subarray(validStart);
-								this.position += validStart;
-								break;
-							}
-							validStart++;
-						}
-						continue;
-					}
-
-					// Check if we have the complete message
-					if (buffer.length >= totalLength) {
-						const message = Buffer.from(buffer.subarray(4, totalLength));
-
-						// Remove processed data from buffer
-						buffer = Buffer.from(buffer.subarray(totalLength));
-						this.position += totalLength;
-
-						yield message;
-					} else {
-						// Wait for more data
-						break;
-					}
-				}
-			}
-
-			if (buffer.length > 0) {
-				console.warn("Incomplete message at end of file");
-			}
-		} finally {
-			this.stream.destroy();
-		}
-	}
-}
-
 class FromBufferSubscription extends FirehoseSubscription {
-	constructor(private readonly reader: BufferReader, options: FirehoseSubscriptionOptions) {
-		super(options);
+	position = 0;
+
+	constructor(
+		private filename: string,
+		private startPosition: number,
+		options: FirehoseSubscriptionOptions,
+	) {
+		const { dbOptions, idResolverOptions } = options;
+		const workerPath = new URL("./ingestWorker.ts", import.meta.url);
+		const workerBlob = new Blob([
+			readFileSync(workerPath),
+			`\nexport default new IngestWorker(${
+				JSON.stringify({ dbOptions, idResolverOptions })
+			});`,
+		], { type: "application/typescript" });
+		super(options, workerBlob);
 	}
 
 	override async start() {
-		let lastPosition = 0;
-		setInterval(() => {
-			const progress = this.reader.position / this.reader.bufferSize * 100;
-			const diffKb = Math.abs(this.reader.position - lastPosition) / 1000;
-			console.log(
-				`Buffer progress: ${progress.toFixed(2)}% | ${
-					(diffKb / 10).toFixed(2)
-				}kb/s | pos: ${this.reader.position}`,
-			);
-			fs.writeFileSync("relay.buffer.pos", (this.reader.position + 1).toString());
-			lastPosition = this.reader.position;
-		}, 10_000);
-
 		try {
 			let messagesSinceTimeout = 0;
-			for await (const chunk of this.reader.read()) {
-				messagesSinceTimeout++;
-				void this.onMessage({ data: chunk });
-				if (messagesSinceTimeout >= (maxPerSecond / 10)) {
-					messagesSinceTimeout = 0;
-					await sleep(100);
+
+			setInterval(() => {
+				if (this.position > this.startPosition) {
+					writeFileSync("relay-buffer.pos", `${this.position}`);
+					console.log(`read ${this.position} lines`);
 				}
+			}, 30_000);
+
+			using fh = await Deno.open(this.filename);
+			for await (
+				const line of fh.readable.pipeThrough(new TextDecoderStream()).pipeThrough(
+					new TextLineStream(),
+				)
+			) {
+				messagesSinceTimeout++;
+				this.position++;
+				if (this.position < this.startPosition) continue;
+				if (messagesSinceTimeout >= maxPerSecond / 10) {
+					messagesSinceTimeout = 0;
+					await sleep(1000 / 10);
+				}
+
+				void this.onMessage(line);
 			}
 
 			// Kill ingest after 10 seconds of inactivity
@@ -156,16 +106,29 @@ class FromBufferSubscription extends FirehoseSubscription {
 			console.error(err);
 		}
 	}
+
+	// @ts-expect-error — onMessage expects a MessageEvent<ArrayBuffer>
+	override onMessage = async (line: string): Promise<void> => {
+		try {
+			// @ts-expect-error — should make pool type generic
+			const res = await this.pool.execute({ line });
+			this.onProcessed(res);
+		} catch (e) {
+			this.opts.onError?.(new FirehoseSubscriptionError(e));
+		}
+	};
 }
 
 async function main() {
 	let startPosition = parseInt(process.argv[2] || "0");
-	if (useFileState) startPosition = parseInt(fs.readFileSync("relay.buffer.pos", "utf-8").trim());
+	if (useFileState) {
+		startPosition = parseInt(fs.readFileSync("relay-buffer.pos", "utf-8").trim());
+	}
 	if (isNaN(startPosition)) startPosition = 0;
 
-	const reader = new BufferReader("relay.buffer", startPosition);
+	const file = "relay-buffer.jsonl";
 
-	const indexer = new FromBufferSubscription(reader, {
+	const indexer = new FromBufferSubscription(file, startPosition, {
 		service: "",
 		// Keep low to avoid deadlock
 		minWorkers: 4,
@@ -180,7 +143,7 @@ async function main() {
 	});
 
 	const onExit = () => {
-		console.log(`Exiting with position ${reader.position}`);
+		console.log(`Exiting with position ${indexer.position}`);
 		return indexer.destroy();
 	};
 	process.on("SIGINT", onExit);

@@ -9,11 +9,13 @@
     "@atproto/lexicon": "npm:@atproto/lexicon@^0.4.11",
     "@atproto/repo": "npm:@atproto/repo@^0.8.1",
     "@atproto/syntax": "npm:@atproto/syntax@^0.4.0",
+    "@futur/bsky-indexer": "jsr:@futur/bsky-indexer@^0.1.3",
     "@jsr/poolifier__poolifier-web-worker": "jsr:@poolifier/poolifier-web-worker@^0.4.31",
     "@redis/client": "npm:@redis/client@^1.6.0",
+    "@std/streams": "jsr:@std/streams@^1.0.9",
     "multiformats": "npm:multiformats@9.9.0",
-    "partysocket": "npm:partysocket@^1.1.4"
+    "partysocket": "npm:partysocket@^1.1.4",
   },
   "nodeModulesDir": "auto",
-  "unstable": ["worker-options"]
+  "unstable": ["worker-options"],
 }

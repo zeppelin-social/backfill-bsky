@@ -1,5 +1,9 @@
-import { FirehoseSubscription, type FirehoseSubscriptionOptions } from "@futur/bsky-indexer";
-import { Buffer } from "node:buffer";
+import { toBytes } from "@atcute/cbor";
+import {
+	decodeChunk,
+	FirehoseSubscription,
+	type FirehoseSubscriptionOptions,
+} from "@futur/bsky-indexer";
 import console from "node:console";
 import * as fs from "node:fs";
 import process from "node:process";
@@ -34,21 +38,19 @@ class ToBufferSubscription extends FirehoseSubscription {
 			dbOptions: { url: "" },
 			idResolverOptions: {},
 			statsFrequencyMs: 0,
-		});
+		}, new URL("./dummyWorker.ts", import.meta.url));
 
-		void this.pool.destroy();
 		this.stream = fs.createWriteStream(filename, { flags: "a" });
 		process.on("exit", () => this.stream.close());
 	}
 
 	override onMessage = async ({ data }: { data: ArrayBuffer }) => {
-		const chunk = new Uint8Array(data);
-		this.stream.write(Buffer.from(chunk));
+		this.stream.write(lexToJson(decodeChunk(new Uint8Array(data)) ?? {}) + "\n");
 	};
 }
 
 function main() {
-	const filename = "relay.buffer";
+	const filename = "relay-buffer.jsonl";
 
 	const sub = new ToBufferSubscription({
 		service: process.env.BUFFER_REPO_PROVIDER,
@@ -57,6 +59,21 @@ function main() {
 	}, filename);
 
 	return sub.start();
+}
+
+function lexToJson(record: Record<string, unknown>) {
+	return JSON.stringify(record, (_, value) => {
+		try {
+			if (value instanceof Uint8Array) {
+				return { $bytes: toBytes(value).$bytes };
+			}
+			// CIDs are already encoded as strings in event data; records are already valid JSON
+			return value;
+		} catch (e) {
+			console.error("Error encoding value", value, e);
+			return value;
+		}
+	});
 }
 
 void main();

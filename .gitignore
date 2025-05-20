@@ -4,6 +4,7 @@ npm-debug.log
 yarn-error.log
 .idea
 .vscode/
+.zed/
 .DS_Store
 *.log
 *.tsbuildinfo
@@ -13,5 +14,5 @@ yarn-error.log
 *~
 *.swp
 dist/
-relay-buffer.jsonl
+relay-buffer.*
 deno.lock
