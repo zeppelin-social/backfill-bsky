@@ -27,6 +27,7 @@ type WorkerMessage = CommitMessage | { type: "shutdownComplete" };
 declare global {
 	namespace NodeJS {
 		interface ProcessEnv {
+		  REDIS_URL: string;
 			BSKY_DB_POSTGRES_URL: string;
 			BSKY_DB_POSTGRES_SCHEMA: string;
 			BSKY_DID_PLC_URL: string;
@@ -35,7 +36,7 @@ declare global {
 	}
 }
 
-for (const envVar of ["BSKY_DB_POSTGRES_URL", "BSKY_DB_POSTGRES_SCHEMA", "BSKY_DID_PLC_URL"]) {
+for (const envVar of ["REDIS_URL", "BSKY_DB_POSTGRES_URL", "BSKY_DB_POSTGRES_SCHEMA", "BSKY_DID_PLC_URL"]) {
 	if (!process.env[envVar]) throw new Error(`Missing env var ${envVar}`);
 }
 
@@ -110,7 +111,7 @@ if (cluster.isWorker) {
 		),
 	);
 
-	const redis = createClient();
+	const redis = createClient({ url: process.env.REDIS_URL });
 	await redis.connect();
 
 	const REPOS_DIR = await fs.mkdtemp(path.join(os.tmpdir(), "backfill-bsky-repos-"));
