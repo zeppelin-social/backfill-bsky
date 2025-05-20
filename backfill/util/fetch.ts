@@ -26,7 +26,7 @@ async function fetchPdsDids(pds: string, onDid: (did: string, pds: string) => vo
 	let fetched = 0;
 	while (true) {
 		try {
-		  const signal = AbortSignal.timeout(30_000);
+			const signal = AbortSignal.timeout(30_000);
 			const res = await fetch(url + "?limit=1000&cursor=" + cursor, { signal });
 			if (!res.ok) {
 				if (res.status === 429) {

@@ -10,8 +10,9 @@ import * as bsky from "@futuristick/atproto-bsky";
 import { createClient } from "@redis/client";
 import Queue from "bee-queue";
 import CacheableLookup from "cacheable-lookup";
-import { unpackMultiple } from "msgpackr";
+import { DecoderStream } from "cbor-x";
 import cluster, { type Worker } from "node:cluster";
+import { createReadStream, existsSync } from "node:fs";
 import fs from "node:fs/promises";
 import * as os from "node:os";
 import path from "node:path";
@@ -322,14 +323,13 @@ if (cluster.isWorker) {
 
 	async function main() {
 		console.log("Reading DIDs");
-		const repos = await readDids();
-		console.log(`Filtering out seen DIDs from ${repos.length} total`);
+		const repos = readDids();
 
 		const seenDids = new Set(await redis.sMembers("backfill:seen"));
 		console.log(`Seen: ${seenDids.size} DIDs`);
 		totalProcessed = seenDids.size;
 
-		for (const [did, pds] of repos) {
+		for await (const [did, pds] of repos) {
 			if (isShuttingDown) break;
 			// dumb pds doesn't implement getRepo
 			if (pds.includes("blueski.social")) continue;
@@ -413,13 +413,15 @@ if (cluster.isWorker) {
 		});
 	}
 
-	async function readDids(): Promise<Array<[string, string]>> {
-		try {
-			return unpackMultiple(await fs.readFile("dids.cache"));
-		} catch (err: any) {
-			console.error("Make sure you ran the fetch-dids script first", err);
+	function readDids() {
+		if (!existsSync("dids.cache")) {
+			console.error("dids.cache file not found. Please run the fetch-dids script first.");
 			process.exit(1);
 		}
+		const decoder = new DecoderStream();
+		const readStream = createReadStream("dids.cache");
+		readStream.pipe(decoder);
+		return decoder;
 	}
 
 	const backoffs = [1_000, 5_000, 15_000, 30_000, 60_000, 120_000, 300_000];
