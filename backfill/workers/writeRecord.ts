@@ -28,6 +28,7 @@ export async function writeRecordWorker() {
 	let toIndexRecords: ToInsertCommit[] = [];
 
 	let recordQueueTimer = setTimeout(processRecordQueue, 500);
+	setTimeout(processActorQueue, 5000);
 
 	const seenDids = new Set<string>();
 	const toIndexDids = new Set<string>();
@@ -86,16 +87,6 @@ export async function writeRecordWorker() {
 
 		const time = `Writing records: ${toIndexRecords.length}`;
 
-		void indexActorQueue.add(async () => {
-			const time = `Indexing actors: ${toIndexDids.size}`;
-			console.time(time);
-			indexingSvc.indexActorsBulk([...toIndexDids]);
-			console.timeEnd(time);
-		}).catch((e) => {
-			console.error(`Error while indexing actors: ${e}`);
-		});
-		toIndexDids.clear();
-
 		const records = [...toIndexRecords];
 		toIndexRecords = [];
 
@@ -111,10 +102,30 @@ export async function writeRecordWorker() {
 		}
 	}
 
+	async function processActorQueue() {
+		if (!isShuttingDown) {
+			setTimeout(processActorQueue, 5000);
+		}
+
+		if (toIndexDids.size > 0) {
+			const dids = [...toIndexDids];
+			void indexActorQueue.add(async () => {
+				const time = `Indexing actors: ${dids.length}`;
+				console.time(time);
+				await indexingSvc.indexActorsBulk(dids);
+				console.timeEnd(time);
+			}).catch((e) => {
+				console.error(`Error while indexing actors: ${e}`);
+			});
+			toIndexDids.clear();
+		}
+	}
+
 	async function handleShutdown() {
 		console.log("Write record worker received shutdown signal");
 		isShuttingDown = true;
 		await processRecordQueue();
+		await processActorQueue();
 		process.send?.({ type: "shutdownComplete" });
 		process.exit(0);
 	}

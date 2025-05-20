@@ -120,7 +120,7 @@ if (cluster.isWorker) {
 		removeOnSuccess: true,
 		removeOnFailure: true,
 		redis,
-});
+	});
 
 	const REPOS_DIR = await fs.mkdtemp(path.join(os.tmpdir(), "backfill-bsky-repos-"));
 
