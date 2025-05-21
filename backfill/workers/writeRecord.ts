@@ -32,7 +32,7 @@ export async function writeRecordWorker() {
 
 	const seenDids = new Set<string>();
 	const toIndexDids = new Set<string>();
-	const indexActorQueue = new PQueue({ concurrency: 5 });
+	const indexActorQueue = new PQueue({ concurrency: 2 });
 
 	let isShuttingDown = false;
 
@@ -110,14 +110,16 @@ export async function writeRecordWorker() {
 		if (toIndexDids.size > 0) {
 			const dids = [...toIndexDids];
 			toIndexDids.clear();
-			void indexActorQueue.add(async () => {
-				const time = `Indexing actors: ${dids.length}`;
-				console.time(time);
-				await indexingSvc.indexActorsBulk(dids);
-				console.timeEnd(time);
-			}).catch((e) => {
-				console.error(`Error while indexing actors: ${e}`);
-			});
+      void indexActorQueue.add(async () => {
+        try {
+          const time = `Indexing actors: ${dids.length}`;
+          console.time(time);
+          await indexingSvc.indexActorsBulk(dids);
+          console.timeEnd(time);
+        } catch (e) {
+          console.error(`Error while indexing actors: ${e}`);
+        }
+      });
 		}
 	}
 
