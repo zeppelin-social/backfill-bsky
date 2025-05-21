@@ -25,7 +25,7 @@
 		"typescript": "^5.7.2"
 	},
 	"dependencies": {
-		"@atcute/car": "^2.0.3",
+		"@atcute/car": "^3.0.5",
 		"@atcute/client": "^2.0.7",
 		"@atcute/tid": "^1.0.2",
 		"@atproto/identity": "^0.4.8",

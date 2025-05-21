@@ -79,6 +79,10 @@ export async function repoWorker() {
 			await redis.sAdd("backfill:seen", did);
 		} catch (err) {
 			console.warn(`iterateAtpRepo error for did ${did} --- ${err}`);
+			if (`${err}`.includes("invalid simple value")) {
+				console.warn(`Marking broken bridgy repo ${did} as seen`);
+				await redis.sAdd("backfill:seen", did);
+			}
 		} finally {
 			repo = null;
 			await fs.unlink(path.join(process.env.REPOS_DIR!, did));

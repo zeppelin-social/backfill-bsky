@@ -387,7 +387,7 @@ if (cluster.isWorker) {
 				}
 			} catch (err) {
 				if (
-					["RepoDeactivated", "RepoTakendown", "RepoNotFound"].some((s) =>
+					["RepoDeactivated", "RepoTakendown", "RepoNotFound", "NotFound"].some((s) =>
 						`${err}`.includes(s)
 					)
 				) {

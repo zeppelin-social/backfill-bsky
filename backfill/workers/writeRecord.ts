@@ -110,16 +110,16 @@ export async function writeRecordWorker() {
 		if (toIndexDids.size > 0) {
 			const dids = [...toIndexDids];
 			toIndexDids.clear();
-      void indexActorQueue.add(async () => {
-        try {
-          const time = `Indexing actors: ${dids.length}`;
-          console.time(time);
-          await indexingSvc.indexActorsBulk(dids);
-          console.timeEnd(time);
-        } catch (e) {
-          console.error(`Error while indexing actors: ${e}`);
-        }
-      });
+			void indexActorQueue.add(async () => {
+				try {
+					const time = `Indexing actors: ${dids.length}`;
+					console.time(time);
+					await indexingSvc.indexActorsBulk(dids);
+					console.timeEnd(time);
+				} catch (e) {
+					console.error(`Error while indexing actors: ${e}`);
+				}
+			});
 		}
 	}
 
