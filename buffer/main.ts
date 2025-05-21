@@ -7,6 +7,8 @@ import {
 import console from "node:console";
 import { createWriteStream, type WriteStream } from "node:fs";
 import process from "node:process";
+import { execSync } from "node:child_process";
+import { existsSync } from "node:fs";
 
 declare global {
 	namespace NodeJS {
@@ -20,11 +22,17 @@ for (const envVar of ["BUFFER_REPO_PROVIDER"]) {
 	if (!process.env[envVar]) throw new Error(`Missing env var ${envVar}`);
 }
 
-// initial cursor
 let initialCursor: number | undefined = 0;
 if (process.argv.join(" ").includes("--cursor")) {
 	const cursor = process.argv[process.argv.indexOf("--cursor")];
 	initialCursor = cursor === "latest" ? undefined : parseInt(cursor);
+} else if (existsSync("relay-buffer.jsonl")) {
+	try {
+		const cursor = execSync("tail -n 1 relay-buffer.jsonl | jq -r '.seq'").toString().trim();
+		initialCursor = parseInt(cursor);
+	} catch (e) {
+		console.error("Failed to read cursor from relay-buffer.jsonl", e);
+	}
 }
 
 class ToBufferSubscription extends FirehoseSubscription {
@@ -40,6 +48,9 @@ class ToBufferSubscription extends FirehoseSubscription {
 			statsFrequencyMs: 0,
 		}, new URL("./dummyWorker.ts", import.meta.url));
 
+		// todo: fix `if (opts.cursor)` in @futur/bsky-indexer
+		if (opts.cursor !== undefined) this.cursor = `${opts.cursor}`;
+
 		this.stream = createWriteStream(filename, { flags: "a" });
 		process.on("exit", () => this.stream.close());
 	}
@@ -54,7 +65,7 @@ function main() {
 
 	const sub = new ToBufferSubscription({
 		service: process.env.BUFFER_REPO_PROVIDER,
-		...(initialCursor ? { cursor: initialCursor } : {}),
+		...(initialCursor !== undefined ? { cursor: initialCursor } : {}),
 		onError: (err) => console.error(...(err.cause ? [err.message, err.cause] : [err])),
 	}, filename);
 
