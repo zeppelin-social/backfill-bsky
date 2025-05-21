@@ -10,19 +10,18 @@ export type CommitData = { uri: string; cid: string; timestamp: string; obj: unk
 export type CommitMessage = { type: "commit"; collection: string; commits: CommitData[] };
 
 export async function repoWorker() {
-	for (const envVar of ["REPOS_DIR", "REDIS_URL"]) {
+	for (const envVar of ["REPOS_DIR"]) {
 		if (!process.env[envVar]) {
 			throw new Error(`Repo worker missing env var ${envVar}`);
 		}
 	}
 
-	const redis = createClient({ url: process.env.REDIS_URL });
+	const redis = createClient();
 	await redis.connect();
 
 	const queue = new Queue<{ did: string }>("repo-processing", {
 		removeOnSuccess: true,
 		removeOnFailure: true,
-		redis,
 	});
 
 	let commitData: Record<string, CommitData[]> = {};
