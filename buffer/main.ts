@@ -4,11 +4,11 @@ import {
 	FirehoseSubscription,
 	type FirehoseSubscriptionOptions,
 } from "@futur/bsky-indexer";
+import { execSync } from "node:child_process";
 import console from "node:console";
 import { createWriteStream, type WriteStream } from "node:fs";
-import process from "node:process";
-import { execSync } from "node:child_process";
 import { existsSync } from "node:fs";
+import process from "node:process";
 
 declare global {
 	namespace NodeJS {
