@@ -209,8 +209,8 @@ if (cluster.isWorker) {
 	cluster.on("exit", handleWorkerExit);
 
 	cluster.on("message", (worker, message: WorkerMessage) => {
-		if (message.type === "shutdownComplete" && !isShuttingDown) {
-			handleWorkerExit(worker, 0, "SIGINT");
+		if (message.type === "shutdownComplete") {
+			if (!isShuttingDown) handleWorkerExit(worker, 0, "SIGINT");
 			if (!worker.process.killed) worker.kill();
 			return;
 		}
