@@ -28,11 +28,11 @@ export async function writeRecordWorker() {
 	let toIndexRecords: ToInsertCommit[] = [];
 
 	let recordQueueTimer = setTimeout(processRecordQueue, 500);
-	setTimeout(processActorQueue, 5000);
+	setTimeout(processActorQueue, 2000);
 
 	const seenDids = new Set<string>();
 	const toIndexDids = new Set<string>();
-	const indexActorQueue = new PQueue({ concurrency: 1 });
+	const indexActorQueue = new PQueue({ concurrency: 5 });
 
 	let isShuttingDown = false;
 
@@ -104,11 +104,12 @@ export async function writeRecordWorker() {
 
 	async function processActorQueue() {
 		if (!isShuttingDown) {
-			setTimeout(processActorQueue, 5000);
+			setTimeout(processActorQueue, 2000);
 		}
 
 		if (toIndexDids.size > 0) {
 			const dids = [...toIndexDids];
+			toIndexDids.clear();
 			void indexActorQueue.add(async () => {
 				const time = `Indexing actors: ${dids.length}`;
 				console.time(time);
@@ -117,7 +118,6 @@ export async function writeRecordWorker() {
 			}).catch((e) => {
 				console.error(`Error while indexing actors: ${e}`);
 			});
-			toIndexDids.clear();
 		}
 	}
 
