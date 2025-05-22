@@ -101,10 +101,12 @@ export async function repoWorker() {
 
 	setTimeout(function sendCommits() {
 		const entries = Object.entries(commitData);
-		commitData = {};
 		for (const [collection, commits] of entries) {
 			process.send!({ type: "commit", collection, commits } satisfies CommitMessage);
+			commitData[collection].length = 0;
 		}
+		commitData = {};
 		setTimeout(sendCommits, 200);
+		entries.length = 0;
 	}, 200);
 }

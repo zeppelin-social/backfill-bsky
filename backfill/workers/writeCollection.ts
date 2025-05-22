@@ -138,6 +138,8 @@ export async function writeCollectionWorker() {
 		} catch (err) {
 			console.error(`Error processing queue for ${collections.join(", ")}`, err);
 			console.timeEnd(time);
+		} finally {
+			records.clear();
 		}
 	}
 

@@ -1,6 +1,7 @@
 import { MemoryCache } from "@atproto/identity";
 import { AtUri } from "@atproto/syntax";
 import { BackgroundQueue, Database } from "@futuristick/atproto-bsky";
+import { LRUCache } from "lru-cache";
 import { CID } from "multiformats/cid";
 import PQueue from "p-queue";
 import { IdResolver, IndexingService } from "../indexingService.js";
@@ -30,7 +31,7 @@ export async function writeRecordWorker() {
 	let recordQueueTimer = setTimeout(processRecordQueue, 500);
 	setTimeout(processActorQueue, 2000);
 
-	const seenDids = new Set<string>();
+	const seenDids = new LRUCache<string, boolean>({ max: 10_000 });
 	const toIndexDids = new Set<string>();
 	const indexActorQueue = new PQueue({ concurrency: 2 });
 
@@ -63,7 +64,7 @@ export async function writeRecordWorker() {
 			const did = uri.host;
 			if (!seenDids.has(did)) {
 				toIndexDids.add(did);
-				seenDids.add(did);
+				seenDids.set(did, true);
 			}
 		}
 
@@ -99,6 +100,8 @@ export async function writeRecordWorker() {
 		} catch (err) {
 			console.error(`Error processing queue`, err);
 			console.timeEnd(time);
+		} finally {
+			records.length = 0;
 		}
 	}
 
