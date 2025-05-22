@@ -9,6 +9,7 @@ import {
 import * as bsky from "@futuristick/atproto-bsky";
 import { createClient } from "@redis/client";
 import Queue from "bee-queue";
+import { heapStats } from "bun:jsc";
 import CacheableLookup from "cacheable-lookup";
 import { DecoderStream } from "cbor-x";
 import cluster, { type Worker } from "node:cluster";
@@ -307,6 +308,11 @@ if (cluster.isWorker) {
 			`Fetch queue: ${fetchQueue.size} DIDs | ${fetchQueue.pending} pending`,
 		);
 	}, 5_000);
+
+	setTimeout(function writeHS() {
+		console.log("heap stats - main - " + JSON.stringify(heapStats()));
+		setTimeout(writeHS, 30_000);
+	}, 30_000);
 
 	async function main() {
 		console.log("Reading DIDs");

@@ -1,6 +1,7 @@
 import { MemoryCache } from "@atproto/identity";
 import { AtUri } from "@atproto/syntax";
 import { BackgroundQueue, Database } from "@futuristick/atproto-bsky";
+import { heapStats } from "bun:jsc";
 import { LRUCache } from "lru-cache";
 import { CID } from "multiformats/cid";
 import PQueue from "p-queue";
@@ -30,6 +31,11 @@ export async function writeRecordWorker() {
 
 	let recordQueueTimer = setTimeout(processRecordQueue, 500);
 	setTimeout(processActorQueue, 2000);
+
+	setTimeout(function writeHS() {
+		console.log("heap stats - writeRecord - " + JSON.stringify(heapStats()));
+		setTimeout(writeHS, 30_000);
+	}, 30_000);
 
 	const seenDids = new LRUCache<string, boolean>({ max: 10_000 });
 	const toIndexDids = new Set<string>();

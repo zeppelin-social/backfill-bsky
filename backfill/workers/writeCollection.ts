@@ -2,6 +2,7 @@ import { MemoryCache } from "@atproto/identity";
 import { BlobRef } from "@atproto/lexicon";
 import { AtUri } from "@atproto/syntax";
 import { BackgroundQueue, Database } from "@futuristick/atproto-bsky";
+import { heapStats } from "bun:jsc";
 import { CID } from "multiformats/cid";
 import { IdResolver, IndexingService } from "../indexingService.js";
 import type { CommitMessage } from "./repo.js";
@@ -62,6 +63,11 @@ export async function writeCollectionWorker() {
 	}
 
 	let queueTimer = setTimeout(processQueue, 1000);
+
+	setTimeout(function writeHS() {
+		console.log("heap stats - writeCollection - " + JSON.stringify(heapStats()));
+		setTimeout(writeHS, 30_000);
+	}, 30_000);
 
 	let isShuttingDown = false;
 
