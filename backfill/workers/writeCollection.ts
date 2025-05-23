@@ -1,13 +1,18 @@
 import { MemoryCache } from "@atproto/identity";
 import { BlobRef } from "@atproto/lexicon";
-import { AtUri } from "@atproto/syntax";
 import { BackgroundQueue, Database } from "@futuristick/atproto-bsky";
 import { heapStats } from "bun:jsc";
 import { CID } from "multiformats/cid";
 import { IdResolver, IndexingService } from "../indexingService.js";
 import type { CommitMessage } from "./repo.js";
 
-export type ToInsertCommit = { uri: AtUri; cid: CID; timestamp: string; obj: unknown };
+export type ToInsertCommit = {
+	did: string;
+	path: string;
+	cid: string;
+	timestamp: string;
+	obj: unknown;
+};
 
 // 3 write workers, picked largely based on vibes to kind of evenly distribute load
 export const writeWorkerAllocations = [[
@@ -89,22 +94,17 @@ export async function writeCollectionWorker() {
 		}
 
 		for (const commit of msg.commits) {
-			const { uri, cid, timestamp, obj: _obj } = commit;
-			if (!uri || !cid || !timestamp || !_obj) {
+			const { did, path, cid, timestamp, obj: _obj } = commit;
+			if (!did || !path || !cid || !timestamp || !_obj) {
 				throw new Error(`Invalid commit data ${JSON.stringify(commit)}`);
 			}
 
 			const obj = jsonToLex(_obj as Record<string, unknown>);
 
-			queues[msg.collection].push({
-				uri: new AtUri(uri),
-				cid: CID.parse(cid),
-				timestamp,
-				obj,
-			});
+			queues[msg.collection].push({ did, path, cid, timestamp, obj });
 		}
 
-		if (queues[msg.collection].length > 500_000) {
+		if (queues[msg.collection].length > 100_000) {
 			clearTimeout(queueTimer);
 			queueTimer = setImmediate(processQueue);
 		}

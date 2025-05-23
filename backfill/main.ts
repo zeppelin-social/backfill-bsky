@@ -189,7 +189,7 @@ if (cluster.isWorker) {
 
 	const numCPUs = os.availableParallelism();
 	const repoWorkerCount = numCPUs <= 10 ? 32 : numCPUs >= 32 ? 96 : numCPUs * 3;
-  for (let i = 3; i < repoWorkerCount; i++) {
+	for (let i = 3; i < repoWorkerCount; i++) {
 		spawnRepoWorker();
 	}
 

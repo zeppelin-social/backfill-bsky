@@ -1,9 +1,7 @@
 import { MemoryCache } from "@atproto/identity";
-import { AtUri } from "@atproto/syntax";
 import { BackgroundQueue, Database } from "@futuristick/atproto-bsky";
 import { heapStats } from "bun:jsc";
 import { LRUCache } from "lru-cache";
-import { CID } from "multiformats/cid";
 import PQueue from "p-queue";
 import { IdResolver, IndexingService } from "../indexingService.js";
 import type { CommitMessage } from "./repo.js";
@@ -56,25 +54,26 @@ export async function writeRecordWorker() {
 		}
 
 		for (const commit of msg.commits) {
-			const { uri: _uri, cid: _cid, timestamp, obj: _obj } = commit;
-			if (!_uri || !_cid || !timestamp || !_obj) {
+			const { did, path, cid, timestamp, obj: _obj } = commit;
+			if (!did || !path || !cid || !timestamp || !_obj) {
 				throw new Error(`Invalid commit data ${JSON.stringify(commit)}`);
 			}
 
-			const uri = new AtUri(_uri);
-			const cid = CID.parse(_cid);
-			const obj = jsonToLex(_obj as Record<string, unknown>);
+			toIndexRecords.push({
+				did,
+				path,
+				cid,
+				timestamp,
+				obj: jsonToLex(_obj as Record<string, unknown>),
+			});
 
-			toIndexRecords.push({ uri, cid, timestamp, obj });
-
-			const did = uri.host;
 			if (!seenDids.has(did)) {
 				toIndexDids.add(did);
 				seenDids.set(did, true);
 			}
 		}
 
-		if (toIndexRecords.length > 200_000) {
+		if (toIndexRecords.length > 100_000) {
 			clearTimeout(recordQueueTimer);
 			recordQueueTimer = setImmediate(processRecordQueue);
 		}
@@ -95,7 +94,7 @@ export async function writeRecordWorker() {
 		const time = `Writing records: ${toIndexRecords.length}`;
 
 		const records = [...toIndexRecords];
-		toIndexRecords = [];
+		toIndexRecords.length = 0;
 
 		try {
 			if (records.length > 0) {

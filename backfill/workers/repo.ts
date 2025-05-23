@@ -6,7 +6,13 @@ import { heapStats } from "bun:jsc";
 import fs from "node:fs/promises";
 import path from "node:path";
 
-export type CommitData = { uri: string; cid: string; timestamp: string; obj: unknown };
+export type CommitData = {
+	did: string;
+	path: string;
+	cid: string;
+	timestamp: string;
+	obj: unknown;
+};
 
 export type CommitMessage = { type: "commit"; collection: string; commits: CommitData[] };
 
@@ -50,7 +56,7 @@ export async function repoWorker() {
 		try {
 			const now = Date.now();
 			for await (const { record, rkey, collection, cid } of iterateAtpRepo(repo)) {
-				const uri = `at://${did}/${collection}/${rkey}`;
+				const path = `${collection}/${rkey}`;
 
 				// This should be the date the AppView saw the record, but since we don't want the "archived post" label
 				// to show for every post in social-app, we'll try our best to figure out when the record was actually created.
@@ -69,7 +75,8 @@ export async function repoWorker() {
 				if (indexedAt > now) indexedAt = now;
 
 				const data = {
-					uri,
+					did,
+					path,
 					cid: cid.$link,
 					timestamp: new Date(indexedAt).toISOString(),
 					obj: record,
