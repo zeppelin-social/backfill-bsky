@@ -2,7 +2,6 @@ import { iterateAtpRepo } from "@atcute/car";
 import { parse as parseTID } from "@atcute/tid";
 import { createClient } from "@redis/client";
 import Queue from "bee-queue";
-import { heapStats } from "bun:jsc";
 import fs from "node:fs/promises";
 import path from "node:path";
 
@@ -111,15 +110,13 @@ export async function repoWorker() {
 		const entries = Object.entries(commitData);
 		for (const [collection, commits] of entries) {
 			process.send!({ type: "commit", collection, commits } satisfies CommitMessage);
-			commitData[collection].length = 0;
 		}
 		commitData = {};
 		setTimeout(sendCommits, 200);
-		entries.length = 0;
 	}, 200);
 
-	setTimeout(function writeHS() {
-		console.log("heap stats - repo - " + JSON.stringify(heapStats()));
-		setTimeout(writeHS, 30_000);
+	setTimeout(function forceGC() {
+		Bun.gc(true);
+		setTimeout(forceGC, 30_000);
 	}, 30_000);
 }

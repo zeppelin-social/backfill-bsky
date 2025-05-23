@@ -1,11 +1,10 @@
 import { MemoryCache } from "@atproto/identity";
 import { BackgroundQueue, Database } from "@futuristick/atproto-bsky";
-import { heapStats } from "bun:jsc";
 import { LRUCache } from "lru-cache";
 import PQueue from "p-queue";
 import { IdResolver, IndexingService } from "../indexingService.js";
 import type { CommitMessage } from "./repo.js";
-import { jsonToLex, type ToInsertCommit } from "./writeCollection.js";
+import type { ToInsertCommit } from "./writeCollection.js";
 
 export async function writeRecordWorker() {
 	console.info(`Starting write record worker`);
@@ -30,9 +29,9 @@ export async function writeRecordWorker() {
 	let recordQueueTimer = setTimeout(processRecordQueue, 500);
 	setTimeout(processActorQueue, 2000);
 
-	setTimeout(function writeHS() {
-		console.log("heap stats - writeRecord - " + JSON.stringify(heapStats()));
-		setTimeout(writeHS, 30_000);
+	setTimeout(function forceGC() {
+		Bun.gc(true);
+		setTimeout(forceGC, 30_000);
 	}, 30_000);
 
 	const seenDids = new LRUCache<string, boolean>({ max: 10_000 });
@@ -54,18 +53,13 @@ export async function writeRecordWorker() {
 		}
 
 		for (const commit of msg.commits) {
-			const { did, path, cid, timestamp, obj: _obj } = commit;
-			if (!did || !path || !cid || !timestamp || !_obj) {
+			const { did, path, cid, timestamp, obj: obj } = commit;
+			if (!did || !path || !cid || !timestamp || !obj) {
 				throw new Error(`Invalid commit data ${JSON.stringify(commit)}`);
 			}
 
-			toIndexRecords.push({
-				did,
-				path,
-				cid,
-				timestamp,
-				obj: jsonToLex(_obj as Record<string, unknown>),
-			});
+			// jsonToLex unnecessary because the record just gets stringified
+			toIndexRecords.push({ did, path, cid, timestamp, obj });
 
 			if (!seenDids.has(did)) {
 				toIndexDids.add(did);
@@ -93,8 +87,8 @@ export async function writeRecordWorker() {
 
 		const time = `Writing records: ${toIndexRecords.length}`;
 
-		const records = [...toIndexRecords];
-		toIndexRecords.length = 0;
+		const records = toIndexRecords;
+		toIndexRecords = [];
 
 		try {
 			if (records.length > 0) {
@@ -105,8 +99,6 @@ export async function writeRecordWorker() {
 		} catch (err) {
 			console.error(`Error processing queue`, err);
 			console.timeEnd(time);
-		} finally {
-			records.length = 0;
 		}
 	}
 

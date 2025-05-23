@@ -9,7 +9,6 @@ import {
 import * as bsky from "@futuristick/atproto-bsky";
 import { createClient } from "@redis/client";
 import Queue from "bee-queue";
-import { heapStats } from "bun:jsc";
 import CacheableLookup from "cacheable-lookup";
 import { DecoderStream } from "cbor-x";
 import cluster, { type Worker } from "node:cluster";
@@ -310,9 +309,9 @@ if (cluster.isWorker) {
 		);
 	}, 5_000);
 
-	setTimeout(function writeHS() {
-		console.log("heap stats - main - " + JSON.stringify(heapStats()));
-		setTimeout(writeHS, 30_000);
+	setTimeout(function forceGC() {
+		Bun.gc(true);
+		setTimeout(forceGC, 30_000);
 	}, 30_000);
 
 	async function main() {
@@ -377,7 +376,7 @@ if (cluster.isWorker) {
 	async function queueRepo(pds: string, did: string) {
 		let pdsQueue = pdsQueues.get(pds);
 		if (!pdsQueue) {
-			pdsQueue = new PQueue({ concurrency: 20 });
+			pdsQueue = new PQueue({ concurrency: 25 });
 			pdsQueues.set(pds, pdsQueue);
 		}
 
