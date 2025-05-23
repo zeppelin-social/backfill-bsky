@@ -377,7 +377,7 @@ if (cluster.isWorker) {
 	async function queueRepo(pds: string, did: string) {
 		let pdsQueue = pdsQueues.get(pds);
 		if (!pdsQueue) {
-			pdsQueue = new PQueue({ concurrency: 15 });
+			pdsQueue = new PQueue({ concurrency: 20 });
 			pdsQueues.set(pds, pdsQueue);
 		}
 
