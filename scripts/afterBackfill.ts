@@ -582,12 +582,13 @@ function batch<T>(iterable: Iterable<T>, batchSize: number): T[][] {
 
 interface State {
 	postIndex: number;
+	profileIndex: number;
 	validationIndex: number;
 }
 
 function loadState(): State {
 	if (!fs.existsSync(statePath)) {
-		state = { postIndex: 0, validationIndex: 0 };
+		state = { postIndex: 0, profileIndex: 0, validationIndex: 0 };
 		saveState((s) => s);
 		return state;
 	}
