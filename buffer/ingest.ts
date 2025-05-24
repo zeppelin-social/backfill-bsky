@@ -210,6 +210,9 @@ async function main() {
 
 	const indexer = new FromBufferSubscription(file, startPosition, {
 		service: "",
+		// keep low to avoid deadlock
+		minWorkers: 3,
+		maxWorkers: 4,
 		statsFrequencyMs: 60_000,
 		idResolverOptions: { plcUrl: process.env.BSKY_DID_PLC_URL },
 		dbOptions: {
