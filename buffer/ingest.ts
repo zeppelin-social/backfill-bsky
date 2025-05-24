@@ -60,12 +60,15 @@ class FromBufferSubscription extends FirehoseSubscription {
 
 	override async start() {
 		try {
-			let messagesSinceTimeout = 0;
+		  const lineCount = await this.estimateLineCount(this.filename);
+		  console.log(`estimated ${lineCount} lines in ${this.filename}`);
+
+				let messagesSinceTimeout = 0;
 
 			setInterval(() => {
 				if (this.position > this.startPosition) {
 					writeFileSync("relay-buffer.pos", `${this.position}`);
-					console.log(`read ${this.position} lines`);
+					console.log(`read ${this.position}/~${lineCount} lines`);
 				}
 			}, 30_000);
 
@@ -117,6 +120,57 @@ class FromBufferSubscription extends FirehoseSubscription {
 			this.opts.onError?.(new FirehoseSubscriptionError(e));
 		}
 	};
+
+	private async estimateLineCount(filepath: string): Promise<number> {
+			const { size: totalSize } = await Deno.stat(filepath);
+			using file = await Deno.open(filepath, { read: true });
+
+			const decoder = new TextDecoder();
+			const buffer = new Uint8Array(32 * 1024);
+			let bytesRead = 0;
+			let lineCount = 0;
+			let partialLine = "";
+			let sampleSize = 0;
+
+			while (lineCount < 1000) {
+				const n = await file.read(buffer);
+
+				if (n === null) {
+					if (partialLine.length > 0) {
+						lineCount++;
+						sampleSize += new TextEncoder().encode(partialLine).length;
+					}
+					break;
+				}
+
+				bytesRead += n;
+				const chunk = decoder.decode(buffer.subarray(0, n), { stream: true });
+				const text = partialLine + chunk;
+				const lines = text.split("\n");
+
+				partialLine = lines.pop() || "";
+
+				for (const line of lines) {
+					if (lineCount < 1000) {
+						lineCount++;
+						sampleSize += new TextEncoder().encode(line).length + 1;
+					} else {
+						break;
+					}
+				}
+			}
+
+			if (bytesRead >= totalSize && lineCount < 1000) {
+				return lineCount;
+			}
+
+			if (lineCount === 0) {
+				return 0;
+			}
+
+			const avgBytesPerLine = sampleSize / lineCount;
+			return Math.round(totalSize / avgBytesPerLine);
+	}
 }
 
 async function main() {
