@@ -39,7 +39,7 @@ if (process.argv.join(" ").includes("--max-per-second")) {
 	);
 }
 
-const FLUSH_EVERY_N_MESSAGES = 500_000;
+const FLUSH_EVERY_N_MESSAGES = 250_000;
 
 Buffer.poolSize = 0;
 
