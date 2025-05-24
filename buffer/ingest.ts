@@ -180,6 +180,8 @@ async function main() {
 	}
 	if (isNaN(startPosition)) startPosition = 0;
 
+	console.log(`starting from line ${startPosition}`);
+
 	const file = "relay-buffer.jsonl";
 
 	const indexer = new FromBufferSubscription(file, startPosition, {
