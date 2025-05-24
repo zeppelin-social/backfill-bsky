@@ -8,7 +8,7 @@ import { Blob, Buffer } from "node:buffer";
 import console from "node:console";
 import { readFileSync, writeFileSync } from "node:fs";
 import process from "node:process";
-import { setInterval, setTimeout } from "node:timers";
+import { clearInterval, setInterval, setTimeout } from "node:timers";
 import { setTimeout as sleep } from "node:timers/promises";
 
 declare global {
@@ -32,10 +32,14 @@ if (process.argv.join(" ").includes("--file-state")) {
 }
 
 // maximum number of messages to read per second
-let maxPerSecond = 20_000;
+let maxPerSecond = 10_000;
 if (process.argv.join(" ").includes("--max-per-second")) {
-	maxPerSecond = parseInt(process.argv[process.argv.indexOf("--max-per-second") + 1].replaceAll(/[^0-9]/g, ""));
+	maxPerSecond = parseInt(
+		process.argv[process.argv.indexOf("--max-per-second") + 1].replaceAll(/[^0-9]/g, ""),
+	);
 }
+
+const FLUSH_EVERY_N_MESSAGES = 500_000;
 
 Buffer.poolSize = 0;
 
@@ -60,10 +64,10 @@ class FromBufferSubscription extends FirehoseSubscription {
 
 	override async start() {
 		try {
-		  const lineCount = await this.estimateLineCount(this.filename);
-		  console.log(`estimated ${lineCount} lines in ${this.filename}`);
+			const lineCount = await this.estimateLineCount(this.filename);
+			console.log(`estimated ${lineCount} lines in ${this.filename}`);
 
-				let messagesSinceTimeout = 0;
+			let messagesSinceTimeout = 0;
 
 			setInterval(() => {
 				if (this.position > this.startPosition) {
@@ -87,6 +91,10 @@ class FromBufferSubscription extends FirehoseSubscription {
 				}
 
 				void this.onMessage(line);
+
+				if (this.position % FLUSH_EVERY_N_MESSAGES === 0) {
+					await this.flush();
+				}
 			}
 
 			// Kill ingest after 10 seconds of inactivity
@@ -121,55 +129,71 @@ class FromBufferSubscription extends FirehoseSubscription {
 		}
 	};
 
+	async flush() {
+		console.time("flushing queue");
+		await new Promise<void>((resolve) => {
+			const interval = setInterval(() => {
+				if (
+					!this.pool.info.queuedTasks
+					|| this.pool.info.queuedTasks < (FLUSH_EVERY_N_MESSAGES / 10)
+				) {
+					clearInterval(interval);
+					resolve();
+				}
+			}, 100);
+		});
+		console.timeEnd("flushing queue");
+	}
+
 	private async estimateLineCount(filepath: string): Promise<number> {
-			const { size: totalSize } = await Deno.stat(filepath);
-			using file = await Deno.open(filepath, { read: true });
+		const { size: totalSize } = await Deno.stat(filepath);
+		using file = await Deno.open(filepath, { read: true });
 
-			const decoder = new TextDecoder();
-			const buffer = new Uint8Array(32 * 1024);
-			let bytesRead = 0;
-			let lineCount = 0;
-			let partialLine = "";
-			let sampleSize = 0;
+		const decoder = new TextDecoder();
+		const buffer = new Uint8Array(32 * 1024);
+		let bytesRead = 0;
+		let lineCount = 0;
+		let partialLine = "";
+		let sampleSize = 0;
 
-			while (lineCount < 1000) {
-				const n = await file.read(buffer);
+		while (lineCount < 1000) {
+			const n = await file.read(buffer);
 
-				if (n === null) {
-					if (partialLine.length > 0) {
-						lineCount++;
-						sampleSize += new TextEncoder().encode(partialLine).length;
-					}
+			if (n === null) {
+				if (partialLine.length > 0) {
+					lineCount++;
+					sampleSize += new TextEncoder().encode(partialLine).length;
+				}
+				break;
+			}
+
+			bytesRead += n;
+			const chunk = decoder.decode(buffer.subarray(0, n), { stream: true });
+			const text = partialLine + chunk;
+			const lines = text.split("\n");
+
+			partialLine = lines.pop() || "";
+
+			for (const line of lines) {
+				if (lineCount < 1000) {
+					lineCount++;
+					sampleSize += new TextEncoder().encode(line).length + 1;
+				} else {
 					break;
 				}
-
-				bytesRead += n;
-				const chunk = decoder.decode(buffer.subarray(0, n), { stream: true });
-				const text = partialLine + chunk;
-				const lines = text.split("\n");
-
-				partialLine = lines.pop() || "";
-
-				for (const line of lines) {
-					if (lineCount < 1000) {
-						lineCount++;
-						sampleSize += new TextEncoder().encode(line).length + 1;
-					} else {
-						break;
-					}
-				}
 			}
+		}
 
-			if (bytesRead >= totalSize && lineCount < 1000) {
-				return lineCount;
-			}
+		if (bytesRead >= totalSize && lineCount < 1000) {
+			return lineCount;
+		}
 
-			if (lineCount === 0) {
-				return 0;
-			}
+		if (lineCount === 0) {
+			return 0;
+		}
 
-			const avgBytesPerLine = sampleSize / lineCount;
-			return Math.round(totalSize / avgBytesPerLine);
+		const avgBytesPerLine = sampleSize / lineCount;
+		return Math.round(totalSize / avgBytesPerLine);
 	}
 }
 
@@ -186,14 +210,12 @@ async function main() {
 
 	const indexer = new FromBufferSubscription(file, startPosition, {
 		service: "",
-		// Keep low to avoid deadlock
-		minWorkers: 4,
-		maxWorkers: 8,
+		statsFrequencyMs: 60_000,
 		idResolverOptions: { plcUrl: process.env.BSKY_DID_PLC_URL },
 		dbOptions: {
 			url: process.env.BSKY_DB_POSTGRES_URL,
 			schema: process.env.BSKY_DB_POSTGRES_SCHEMA,
-			poolSize: 500,
+			poolSize: 200,
 		},
 		onError: (err) => console.error(...(err.cause ? [err.message, err.cause] : [err])),
 	});
