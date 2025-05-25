@@ -39,7 +39,9 @@ if (process.argv.join(" ").includes("--max-per-second")) {
 	);
 }
 
-const FLUSH_EVERY_N_MESSAGES = 1_000_000;
+const FLUSH_EVERY_N_MESSAGES = 500_000;
+
+let messagesSent = 0, messagesProcessed = 0;
 
 Buffer.poolSize = 0;
 
@@ -73,14 +75,17 @@ class FromBufferSubscription extends FirehoseSubscription {
 			const sub = this;
 			setTimeout(async function logPosition() {
 				if (sub.position > sub.startPosition) {
-				  if (waitingForFlush) await waitingForFlush;
-					console.log(`read ${sub.position}/~${lineCount} lines`);
+					if (waitingForFlush) await waitingForFlush;
+					console.log(
+						`${Math.round(messagesProcessed / 30)} / ${
+							Math.round(messagesSent / 30)
+						} per sec (${
+							Math.round((messagesProcessed / messagesSent) * 100)
+						}%) [${sub.pool.info.workerNodes} workers; ${sub.pool.info.queuedTasks} queued; ${sub.pool.info.executingTasks} executing] (~${sub.position}/${lineCount})`,
+					);
 				}
 				setTimeout(logPosition, 30_000);
 			}, 30_000);
-
-			// kicks off the stats logging interval; empty initFirehose() and missing redis should prevent this from doing anything else
-			super.start();
 
 			using fh = await Deno.open(this.filename);
 			for await (
@@ -127,14 +132,14 @@ class FromBufferSubscription extends FirehoseSubscription {
 		}
 	}
 
-	override initFirehose() {}
-
 	// @ts-expect-error — onMessage expects a MessageEvent<ArrayBuffer>
 	override onMessage = async (line: string): Promise<void> => {
 		try {
+			messagesSent++;
 			// @ts-expect-error — should make pool type generic
 			const res = await this.pool.execute({ line });
 			this.onProcessed(res);
+			messagesProcessed++;
 		} catch (e) {
 			this.opts.onError?.(new FirehoseSubscriptionError(e));
 		}
@@ -222,6 +227,7 @@ async function main() {
 	const indexer = new FromBufferSubscription(file, startPosition, {
 		service: "",
 		statsFrequencyMs: 60_000,
+		maxConcurrency: 100,
 		idResolverOptions: { plcUrl: process.env.BSKY_DID_PLC_URL },
 		dbOptions: {
 			url: process.env.BSKY_DB_POSTGRES_URL,
