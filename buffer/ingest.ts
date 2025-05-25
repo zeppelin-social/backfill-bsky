@@ -32,14 +32,14 @@ if (process.argv.join(" ").includes("--file-state")) {
 }
 
 // maximum number of messages to read per second
-let maxPerSecond = 10_000;
+let maxPerSecond = 6_000;
 if (process.argv.join(" ").includes("--max-per-second")) {
 	maxPerSecond = parseInt(
 		process.argv[process.argv.indexOf("--max-per-second") + 1].replaceAll(/[^0-9]/g, ""),
 	);
 }
 
-const FLUSH_EVERY_N_MESSAGES = 500_000;
+const FLUSH_EVERY_N_MESSAGES = 1_000_000;
 
 Buffer.poolSize = 0;
 
