@@ -70,11 +70,17 @@ class FromBufferSubscription extends FirehoseSubscription {
 			let messagesSinceTimeout = 0;
 			let waitingForFlush: Promise<void> | null = null;
 
-			setInterval(() => {
-				if (this.position > this.startPosition && waitingForFlush === null) {
-					console.log(`read ${this.position}/~${lineCount} lines`);
+			const sub = this;
+			setTimeout(async function logPosition() {
+				if (sub.position > sub.startPosition) {
+				  if (waitingForFlush) await waitingForFlush;
+					console.log(`read ${sub.position}/~${lineCount} lines`);
 				}
+				setTimeout(logPosition, 30_000);
 			}, 30_000);
+
+			// kicks off the stats logging interval; empty initFirehose() and missing redis should prevent this from doing anything else
+			super.start();
 
 			using fh = await Deno.open(this.filename);
 			for await (
@@ -215,6 +221,7 @@ async function main() {
 
 	const indexer = new FromBufferSubscription(file, startPosition, {
 		service: "",
+		statsFrequencyMs: 60_000,
 		idResolverOptions: { plcUrl: process.env.BSKY_DID_PLC_URL },
 		dbOptions: {
 			url: process.env.BSKY_DB_POSTGRES_URL,
