@@ -39,7 +39,7 @@ if (process.argv.join(" ").includes("--max-per-second")) {
 	);
 }
 
-const FLUSH_EVERY_N_MESSAGES = 250_000;
+const FLUSH_EVERY_N_MESSAGES = 500_000;
 
 Buffer.poolSize = 0;
 
@@ -68,10 +68,10 @@ class FromBufferSubscription extends FirehoseSubscription {
 			console.log(`estimated ${lineCount} lines in ${this.filename}`);
 
 			let messagesSinceTimeout = 0;
+			let waitingForFlush: Promise<void> | null = null;
 
 			setInterval(() => {
-				if (this.position > this.startPosition) {
-					writeFileSync("relay-buffer.pos", `${this.position}`);
+				if (this.position > this.startPosition && waitingForFlush === null) {
 					console.log(`read ${this.position}/~${lineCount} lines`);
 				}
 			}, 30_000);
@@ -93,7 +93,10 @@ class FromBufferSubscription extends FirehoseSubscription {
 				void this.onMessage(line);
 
 				if (this.position % FLUSH_EVERY_N_MESSAGES === 0) {
-					await this.flush();
+					waitingForFlush = this.flush();
+					await waitingForFlush;
+					waitingForFlush = null;
+					writeFileSync("relay-buffer.pos", `${this.position}`);
 				}
 			}
 
@@ -117,6 +120,8 @@ class FromBufferSubscription extends FirehoseSubscription {
 			console.error(err);
 		}
 	}
+
+	override initFirehose() {}
 
 	// @ts-expect-error — onMessage expects a MessageEvent<ArrayBuffer>
 	override onMessage = async (line: string): Promise<void> => {
@@ -210,10 +215,6 @@ async function main() {
 
 	const indexer = new FromBufferSubscription(file, startPosition, {
 		service: "",
-		// keep low to avoid deadlock
-		minWorkers: 3,
-		maxWorkers: 4,
-		statsFrequencyMs: 60_000,
 		idResolverOptions: { plcUrl: process.env.BSKY_DID_PLC_URL },
 		dbOptions: {
 			url: process.env.BSKY_DB_POSTGRES_URL,
