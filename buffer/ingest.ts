@@ -71,17 +71,19 @@ class FromBufferSubscription extends FirehoseSubscription {
 
 			let messagesSinceTimeout = 0;
 			let waitingForFlush: Promise<void> | null = null;
+			let lastLog = Date.now();
 
 			const sub = this;
 			setTimeout(async function logPosition() {
 				if (sub.position > sub.startPosition) {
 					if (waitingForFlush) await waitingForFlush;
+					const secondsSinceLastLog = (Date.now() - lastLog) / 1000;
 					console.log(
-						`${Math.round(messagesProcessed / 30)} / ${
-							Math.round(messagesSent / 30)
+						`${Math.round(messagesProcessed / secondsSinceLastLog)} / ${
+							Math.round(messagesSent / secondsSinceLastLog)
 						} per sec (${
 							Math.round((messagesProcessed / messagesSent) * 100)
-						}%) [${sub.pool.info.workerNodes} workers; ${sub.pool.info.queuedTasks} queued; ${sub.pool.info.executingTasks} executing] (~${sub.position}/${lineCount})`,
+						}%) - ${sub.position}/~${lineCount} [${sub.pool.info.workerNodes} workers; ${sub.pool.info.queuedTasks} queued; ${sub.pool.info.executingTasks} executing]`,
 					);
 				}
 				setTimeout(logPosition, 30_000);
