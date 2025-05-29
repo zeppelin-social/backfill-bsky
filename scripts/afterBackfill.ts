@@ -101,9 +101,9 @@ async function backfillPostAggregates({ db }: Database, cursor: string | null = 
             FROM post
             WHERE uri IS NOT NULL
               AND cid IS NOT NULL
-              AND (${cursor} IS NULL OR uri > ${cursor})
+              AND (${cursor}::text IS NULL OR uri > ${cursor}::text)
             ORDER BY uri ASC
-            LIMIT ${limit}
+            LIMIT ${limit}::bigint
         )
         INSERT INTO post_agg ("uri", "replyCount", "likeCount", "repostCount", "quoteCount")
         SELECT
@@ -151,9 +151,9 @@ async function backfillPostAggregates({ db }: Database, cursor: string | null = 
           FROM post
           WHERE uri IS NOT NULL
             AND cid IS NOT NULL
-            AND (${cursor} IS NULL OR uri > ${cursor})
+            AND (${cursor}::text IS NULL OR uri > ${cursor}::text)
           ORDER BY uri ASC
-          LIMIT ${limit}
+          LIMIT ${limit}::bigint
       )
       SELECT
           COUNT(inserted.uri) as processed_count,
@@ -204,9 +204,9 @@ async function backfillProfileAggregates({ db }: Database, cursor: string | null
           ROW_NUMBER() OVER (ORDER BY actor.did ASC) as rn
         FROM actor
         WHERE actor.did IS NOT NULL
-          AND (${cursor} IS NULL OR ${cursor} = '' OR actor.did > ${cursor})
+          AND (${cursor}::text IS NULL OR ${cursor}::text = '' OR actor.did > ${cursor}::text)
         ORDER BY actor.did ASC
-        LIMIT ${limit}
+        LIMIT ${limit}::bigint
       ),
       batch_profiles AS (
         SELECT creator FROM batch_query
