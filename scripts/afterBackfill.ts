@@ -36,28 +36,25 @@ for (const envVar of ["BSKY_DB_POSTGRES_URL", "BSKY_DB_POSTGRES_SCHEMA", "BSKY_D
 }
 
 const statePath = path.join(process.cwd(), "after-backfill-state.json");
-let state: State = { postIndex: 0, profileIndex: 0, validationIndex: 0 };
+let state: State = { postCursor: null, profileCursor: null, validationIndex: 0 };
 
-const POOL_SIZE = 500;
+const POOL_SIZE = 10;
 
-const DB_SETTINGS = {
-	max_parallel_workers: 24,
-	max_parallel_workers_per_gather: 24,
-	max_worker_processes: 32,
-	maintenance_work_mem: "\"48GB\"",
-};
+// const DB_SETTINGS = {
+// 	max_parallel_workers: 24,
+// 	max_parallel_workers_per_gather: 24,
+// 	max_worker_processes: 32,
+// 	maintenance_work_mem: "\"32GB\"",
+// };
 
 async function main() {
-	let [postOffset, validationOffset] = process.argv.slice(2).map((arg) => {
-		if (!arg) return undefined;
-		const num = parseInt(arg);
-		if (isNaN(num)) throw new Error(`Invalid offset: ${arg}`);
-		return num;
-	});
+  let [postCursor, profileCursor, _validationOffset]: Array<string | null> = process.argv.slice(2);
+
 
 	const state = loadState();
-	postOffset ??= state.postIndex;
-	validationOffset ??= state.validationIndex;
+	postCursor ??= state.postCursor;
+	profileCursor ??= state.profileCursor;
+	const validationOffset = (_validationOffset && !isNaN(parseInt(_validationOffset))) ? parseInt(_validationOffset) : state.validationIndex;
 
 	const db = new Database({
 		url: process.env.BSKY_DB_POSTGRES_URL,
@@ -66,27 +63,26 @@ async function main() {
 	});
 
 	await alterDbSettings(db);
-	await createIndexes(db);
 	addExitHandlers(db);
 
 	console.log("beginning backfill...");
 
 	await Promise.allSettled([
-		backfillPostAggregates(db, postOffset),
-		backfillProfileAggregates(db),
+		backfillPostAggregates(db, postCursor),
+		backfillProfileAggregates(db, profileCursor),
 	]);
 	await backfillPostValidation(db, validationOffset);
 }
 
 void main();
 
-async function backfillPostAggregates({ db }: Database, offset?: number | undefined) {
+async function backfillPostAggregates({ db }: Database, cursor: string | null = null) {
 	const limit = 10_000;
 	let rowCount = await fastRowCount(db, "post");
 	console.log(`post row count: ${rowCount}`);
 
 	let batches = Math.ceil(rowCount / limit);
-	let i = offset ?? 0;
+	let i = 0;
 	try {
 		while (true) {
 			if (i >= batches) {
@@ -94,52 +90,85 @@ async function backfillPostAggregates({ db }: Database, offset?: number | undefi
 				batches = Math.ceil(rowCount / limit);
 			}
 
-			saveState((s) => ({ ...s, postIndex: i }));
-			const offset = i * limit;
+			saveState((s) => ({ ...s, postCursor: cursor }));
 
 			console.time(`backfilling posts ${i + 1}/${batches}`);
 
 			const inserted = await sql`
-			WITH inserted AS (
-				WITH uris (uri) AS (
-				  SELECT uri FROM post WHERE uri IS NOT NULL ORDER BY "uri" ASC LIMIT ${limit} OFFSET ${offset}
-				)
-				INSERT INTO post_agg ("uri", "replyCount", "likeCount", "repostCount")
-				SELECT
-				  v.uri,
-				  COALESCE(replies.count, 0) as "replyCount",
-				  COALESCE(likes.count, 0) as "likeCount",
-				  COALESCE(reposts.count, 0) as "repostCount"
-				FROM uris v
-				LEFT JOIN (
-				  SELECT "replyParent" as uri, COUNT(*) as count
-				  FROM post
-				  WHERE "replyParent" IN (SELECT uri FROM uris)
-				    AND (post."violatesThreadGate" IS NULL OR post."violatesThreadGate" = false)
-				  GROUP BY "replyParent"
-				) replies ON replies.uri = v.uri
-				LEFT JOIN (
-				  SELECT subject as uri, COUNT(*) as count
-				  FROM "like"
-				  WHERE subject IN (SELECT uri FROM uris)
-				  GROUP BY subject
-				) likes ON likes.uri = v.uri
-				LEFT JOIN (
-				  SELECT subject as uri, COUNT(*) as count
-				  FROM repost
-				  WHERE subject IN (SELECT uri FROM uris)
-				  GROUP BY subject
-				) reposts ON reposts.uri = v.uri
-				ON CONFLICT (uri) DO UPDATE
-				SET "replyCount" = excluded."replyCount",
-				    "likeCount" = excluded."likeCount",
-				    "repostCount" = excluded."repostCount"
-			    RETURNING 1
-		    )
-		    SELECT * FROM inserted
+   	  WITH inserted AS (
+        WITH posts (uri, cid) AS (
+            SELECT uri, cid
+            FROM post
+            WHERE uri IS NOT NULL
+              AND cid IS NOT NULL
+              AND (${cursor} IS NULL OR uri > ${cursor})
+            ORDER BY uri ASC
+            LIMIT ${limit}
+        )
+        INSERT INTO post_agg ("uri", "replyCount", "likeCount", "repostCount", "quoteCount")
+        SELECT
+            p.uri,
+            COALESCE(replies.count, 0) as "replyCount",
+            COALESCE(likes.count, 0) as "likeCount",
+            COALESCE(reposts.count, 0) as "repostCount",
+            COALESCE(quotes.quoteCount, 0) as "quoteCount"
+        FROM posts p
+        LEFT JOIN (
+            SELECT "replyParent" as uri, COUNT(*) as count
+            FROM post
+            WHERE "replyParent" IN (SELECT uri FROM posts)
+                AND (post."violatesThreadGate" IS NULL OR post."violatesThreadGate" = false)
+            GROUP BY "replyParent"
+        ) replies ON replies.uri = p.uri
+        LEFT JOIN (
+            SELECT subject as uri, COUNT(*) as count
+            FROM "like"
+            WHERE subject IN (SELECT uri FROM posts)
+            GROUP BY subject
+        ) likes ON likes.uri = p.uri
+        LEFT JOIN (
+            SELECT subject as uri, COUNT(*) as count
+            FROM repost
+            WHERE subject IN (SELECT uri FROM posts)
+            GROUP BY subject
+        ) reposts ON reposts.uri = p.uri
+        LEFT JOIN (
+            SELECT subject as uri, COUNT(*) as quoteCount
+            FROM quote
+            WHERE subject IN (SELECT uri FROM posts)
+            AND "subjectCid" IN (SELECT cid FROM posts WHERE quote.subject = posts.uri)
+            GROUP BY subject
+        ) quotes ON quotes.uri = p.uri
+        ON CONFLICT (uri) DO UPDATE
+            SET "replyCount" = excluded."replyCount",
+                "likeCount" = excluded."likeCount",
+                "repostCount" = excluded."repostCount",
+                "quoteCount" = excluded."quoteCount"
+        RETURNING uri
+      ),
+      batch_info AS (
+          SELECT uri
+          FROM post
+          WHERE uri IS NOT NULL
+            AND cid IS NOT NULL
+            AND (${cursor} IS NULL OR uri > ${cursor})
+          ORDER BY uri ASC
+          LIMIT ${limit}
+      )
+      SELECT
+          COUNT(inserted.uri) as processed_count,
+          MAX(batch_info.uri) as next_cursor,
+          MIN(batch_info.uri) as batch_start,
+          MAX(batch_info.uri) as batch_end
+      FROM inserted
+      FULL OUTER JOIN batch_info ON inserted.uri = batch_info.uri;
 			`.execute(db);
 
 			if (inserted.rows.length === 0) break;
+			// @ts-expect-error — row is not typed
+			if (inserted.rows[0].processed_count === 0) break;
+			// @ts-expect-error — row is not typed
+			cursor = inserted.rows[0].next_cursor;
 
 			console.timeEnd(`backfilling posts ${i + 1}/${batches}`);
 			i++;
@@ -150,145 +179,92 @@ async function backfillPostAggregates({ db }: Database, offset?: number | undefi
 	}
 }
 
-async function backfillProfileAggregates({ db }: Database) {
-	let rowCount = await fastRowCount(db, "profile");
-	console.log(`profile row count: ${rowCount}`);
+async function backfillProfileAggregates({ db }: Database, cursor: string | null = null) {
+  const limit = 1_000;
+	let rowCount = await fastRowCount(db, "actor");
+	console.log(`actor row count: ${rowCount}`);
 
-	const profilesMap = new Map<
-		string,
-		{ postsCount: number; followersCount: number; followsCount: number }
-	>();
-
+	let batches = Math.ceil(rowCount / limit);
+  let i = 0;
 	try {
-		console.time(`backfilling profiles - fetching dids`);
-		const dids = await db.selectFrom("profile").select(["creator"]).execute();
-		for (const did of dids) {
-			profilesMap.set(did.creator, { postsCount: 0, followersCount: 0, followsCount: 0 });
-		}
-		console.timeEnd(`backfilling profiles - fetching dids`);
-
-		console.time(`backfilling profiles - fetching posts`);
-		const batchSize = 10_000_000;
-		let postsOffset = 0;
 		while (true) {
-			console.time(`backfilling profiles - fetching posts - batch ${postsOffset + 1}`);
-			const posts = await db.selectFrom("post").select(["creator"]).orderBy("uri", "asc")
-				.limit(batchSize).offset(postsOffset).execute();
-
-			if (posts.length === 0) break;
-
-			for (const post of posts) {
-				const { creator } = post;
-				const fromMap = profilesMap.get(creator);
-				if (!fromMap) continue;
-				profilesMap.set(creator, { ...fromMap, postsCount: fromMap.postsCount + 1 });
+			if (i >= batches) {
+				rowCount = await fastRowCount(db, "profile");
+				batches = Math.ceil(rowCount / limit);
 			}
 
-			postsOffset += batchSize;
-			console.timeEnd(`backfilling profiles - fetching posts - batch ${postsOffset + 1}`);
-		}
-		console.timeEnd(`backfilling profiles - fetching posts`);
+			saveState((s) => ({ ...s, profileCursor: cursor }));
 
-		console.time(`backfilling profiles - fetching follows`);
-		let followsOfset = 0;
-		while (true) {
-			console.time(`backfilling profiles - fetching follows - batch ${followsOfset + 1}`);
-			const follows = await db.selectFrom("follow").select(["subjectDid", "creator"]).orderBy(
-				"uri",
-				"asc",
-			).limit(batchSize).offset(followsOfset).execute();
+			console.time(`backfilling profiles ${i + 1}/${batches}`);
 
-			if (follows.length === 0) break;
+			const inserted = await sql`
+      WITH batch_query AS (
+        SELECT
+          actor.did as creator,
+          ROW_NUMBER() OVER (ORDER BY actor.did ASC) as rn
+        FROM actor
+        WHERE actor.did IS NOT NULL
+          AND (${cursor} IS NULL OR ${cursor} = '' OR actor.did > ${cursor})
+        ORDER BY actor.did ASC
+        LIMIT ${limit}
+      ),
+      batch_profiles AS (
+        SELECT creator FROM batch_query
+      ),
+      followers_counts AS (
+        SELECT f."subjectDid" as did, COUNT(*) as cnt
+        FROM follow f
+        WHERE f."subjectDid" IN (SELECT creator FROM batch_profiles)
+        GROUP BY f."subjectDid"
+      ),
+      follows_counts AS (
+        SELECT f.creator as did, COUNT(*) as cnt
+        FROM follow f
+        WHERE f.creator IN (SELECT creator FROM batch_profiles)
+        GROUP BY f.creator
+      ),
+      posts_counts AS (
+        SELECT p.creator as did, COUNT(*) as cnt
+        FROM post p
+        WHERE p.creator IN (SELECT creator FROM batch_profiles)
+        GROUP BY p.creator
+      ),
+      insert_result AS (
+        INSERT INTO profile_agg ("did", "followersCount", "followsCount", "postsCount")
+        SELECT
+          bp.creator,
+          COALESCE(fl.cnt, 0),
+          COALESCE(fo.cnt, 0),
+          COALESCE(p.cnt, 0)
+        FROM batch_profiles bp
+        LEFT JOIN followers_counts fl ON fl.did = bp.creator
+        LEFT JOIN follows_counts fo ON fo.did = bp.creator
+        LEFT JOIN posts_counts p ON p.did = bp.creator
+        ON CONFLICT (did) DO UPDATE
+        SET "followersCount" = excluded."followersCount",
+            "followsCount" = excluded."followsCount",
+            "postsCount" = excluded."postsCount"
+        RETURNING did
+      )
+      SELECT
+        MAX(creator) as next_cursor,
+        COUNT(*) as processed_count,
+        MIN(creator) as batch_start,
+        MAX(creator) as batch_end
+      FROM batch_profiles;
+			`.execute(db);
 
-			for (const follow of follows) {
-				const { subjectDid, creator } = follow;
-				const subjectFromMap = profilesMap.get(subjectDid);
-				const creatorFromMap = profilesMap.get(creator);
-				if (subjectFromMap) {
-					profilesMap.set(subjectDid, {
-						...subjectFromMap,
-						followersCount: subjectFromMap.followersCount + 1,
-					});
-				}
-				if (creatorFromMap) {
-					profilesMap.set(creator, {
-						...creatorFromMap,
-						followsCount: creatorFromMap.followsCount + 1,
-					});
-				}
-			}
+			if (inserted.rows.length === 0) break;
+			// @ts-expect-error — row is not typed
+			if (inserted.rows[0].processed_count === 0) break;
+			// @ts-expect-error — row is not typed
+      cursor = inserted.rows[0].next_cursor;
 
-			followsOfset += batchSize;
-			console.timeEnd(`backfilling profiles - fetching follows - batch ${followsOfset + 1}`);
-		}
-		console.timeEnd(`backfilling profiles - fetching follows`);
-
-		console.time(`backfilling profiles - creating aggregates`);
-		const indexes = await sql<
-			{ indexdef: string }
-		>`SELECT indexdef FROM pg_indexes WHERE tablename = 'profile_agg'`.execute(db);
-
-		console.time(`creating temp profile_agg table`);
-		await sql`CREATE TABLE IF NOT EXISTS profile_agg_temp (LIKE profile_agg INCLUDING CONSTRAINTS INCLUDING GENERATED INCLUDING IDENTITY INCLUDING STORAGE)`
-			.execute(db);
-		console.timeEnd(`creating temp profile_agg table`);
-
-		let i = 0;
-		for (const profiles of batch(profilesMap.entries(), 100_000)) {
-			console.time(
-				`backfilling profiles - creating aggregates - batch ${i + 1}/${
-					profilesMap.size / 100_000
-				}`,
-			);
-			const transposed: [
-				dids: string[],
-				postsCount: number[],
-				followersCount: number[],
-				followsCount: number[],
-			] = [[], [], [], []];
-			for (const [did, profile] of profiles) {
-				transposed[0].push(did);
-				transposed[1].push(profile.postsCount);
-				transposed[2].push(profile.followersCount);
-				transposed[3].push(profile.followsCount);
-			}
-			await executeRaw(
-				db,
-				`
-			INSERT INTO profile_agg_temp ("did", "postsCount", "followersCount", "followsCount")
-			SELECT * FROM unnest($1::text[], $2::bigint[], $3::bigint[], $4::bigint[]) AS t(did, "postsCount", "followersCount", "followsCount")
-			ON CONFLICT (did) DO UPDATE
-			SET "postsCount" = excluded."postsCount",
-			    "followersCount" = excluded."followersCount",
-			    "followsCount" = excluded."followsCount"
-			RETURNING 1
-			`,
-				transposed,
-			);
-			console.timeEnd(
-				`backfilling profiles - creating aggregates - batch ${i + 1}/${
-					profilesMap.size / 100_000
-				}`,
-			);
+			console.timeEnd(`backfilling posts ${i + 1}/${batches}`);
 			i++;
 		}
-
-		console.time(`backfilling profiles - replacing table`);
-		await db.transaction().execute(async (db) => {
-			console.time(`backfilling profiles - dropping table and renaming`);
-			await db.schema.dropTable("profile_agg").execute();
-			await sql`ALTER TABLE profile_agg_temp RENAME TO profile_agg`.execute(db);
-			console.timeEnd(`backfilling profiles - dropping table and renaming`);
-
-			console.time(`backfilling profiles - recreating indexes`);
-			await Promise.all(indexes.rows.map((index) => executeRaw(db, index.indexdef, [])));
-			console.timeEnd(`backfilling profiles - recreating indexes`);
-		});
-		console.timeEnd(`backfilling profiles - replacing table`);
-
-		console.timeEnd(`backfilling profiles - creating aggregates`);
 	} catch (err) {
-		console.error(`backfilling profiles`, err);
+		console.error(`backfilling posts ${i + 1}/${batches}`, err);
 		if (err instanceof Error && err.stack) console.error(err.stack);
 	}
 }
@@ -518,42 +494,23 @@ async function fastRowCount(db: DatabaseSchema, table: string) {
 	`.execute(db).then((res) => res.rows[0].row_count);
 }
 
-async function createIndexes(db: Database) {
-	await db.pool.query(
-		`CREATE INDEX IF NOT EXISTS "idx_post_replyparent" ON "post" ("replyParent") WHERE "violatesThreadGate" IS NULL OR "violatesThreadGate" = FALSE`,
-	);
-	await db.pool.query(`CREATE INDEX IF NOT EXISTS "idx_like_subject" ON "like" ("subject")`);
-	await db.pool.query(`CREATE INDEX IF NOT EXISTS "idx_repost_subject" ON "repost" ("subject")`);
-	await db.pool.query(`CREATE INDEX IF NOT EXISTS "idx_post_creator" ON "post" ("creator")`);
-	await db.pool.query(
-		`CREATE INDEX IF NOT EXISTS "idx_follow_subject" ON "follow" ("subjectDid")`,
-	);
-	await db.pool.query(`CREATE INDEX IF NOT EXISTS "idx_follow_creator" ON "follow" ("creator")`);
-	await db.pool.query(
-		`CREATE INDEX IF NOT EXISTS "idx_post_reply_combined" ON "post" ("replyParent", "replyRoot") WHERE "replyParent" IS NOT NULL AND "replyRoot" IS NOT NULL`,
-	);
-	await db.pool.query(
-		`CREATE INDEX IF NOT EXISTS "idx_post_embed" ON "post_embed_record" ("postUri", "embedUri")`,
-	);
-}
-
 async function alterDbSettings(db: Database) {
-	return Promise.all(
-		Object.entries(DB_SETTINGS).map(([setting, value]) =>
-			db.pool.query(`ALTER SYSTEM SET ${setting} = ${value}`)
-		),
-	);
+	// return Promise.all(
+	// 	Object.entries(DB_SETTINGS).map(([setting, value]) =>
+	// 		db.pool.query(`ALTER SYSTEM SET ${setting} = ${value}`)
+	// 	),
+	// );
 }
 
 function addExitHandlers(db: Database) {
 	let reset = false;
 	process.on("beforeExit", async () => {
 		console.log("Resetting DB settings");
-		await Promise.all(
-			Object.keys(DB_SETTINGS).map((setting) =>
-				db.pool.query(`ALTER SYSTEM RESET ${setting}`)
-			),
-		);
+		// await Promise.all(
+		// 	Object.keys(DB_SETTINGS).map((setting) =>
+		// 		db.pool.query(`ALTER SYSTEM RESET ${setting}`)
+		// 	),
+		// );
 
 		console.log("Closing DB connection");
 		await db.pool.end();
@@ -561,34 +518,22 @@ function addExitHandlers(db: Database) {
 	});
 	process.on("exit", (code) => {
 		if (reset) return;
-		console.log(
-			Object.keys(DB_SETTINGS).map((setting) => `ALTER SYSTEM RESET ${setting};`).join(" "),
-		);
+		// console.log(
+		// 	Object.keys(DB_SETTINGS).map((setting) => `ALTER SYSTEM RESET ${setting};`).join(" "),
+		// );
 		console.log(`Exiting with code ${code}`);
 	});
 }
 
-function batch<T>(iterable: Iterable<T>, batchSize: number): T[][] {
-	const result: T[][] = [[]];
-	for (const item of iterable) {
-		const arr = result[result.length - 1];
-		arr.push(item);
-		if (arr.length === batchSize) {
-			result.push([]);
-		}
-	}
-	return result;
-}
-
 interface State {
-	postIndex: number;
-	profileIndex: number;
+	postCursor: string | null;
+	profileCursor: string | null;
 	validationIndex: number;
 }
 
 function loadState(): State {
 	if (!fs.existsSync(statePath)) {
-		state = { postIndex: 0, profileIndex: 0, validationIndex: 0 };
+		state = { postCursor: null, profileCursor: null, validationIndex: 0 };
 		saveState((s) => s);
 		return state;
 	}
