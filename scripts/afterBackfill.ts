@@ -48,13 +48,7 @@ const POOL_SIZE = 10;
 // };
 
 async function main() {
-  let [postCursor, profileCursor, _validationOffset]: Array<string | null> = process.argv.slice(2);
-
-
 	const state = loadState();
-	postCursor ??= state.postCursor;
-	profileCursor ??= state.profileCursor;
-	const validationOffset = (_validationOffset && !isNaN(parseInt(_validationOffset))) ? parseInt(_validationOffset) : state.validationIndex;
 
 	const db = new Database({
 		url: process.env.BSKY_DB_POSTGRES_URL,
@@ -68,10 +62,10 @@ async function main() {
 	console.log("beginning backfill...");
 
 	await Promise.allSettled([
-		backfillPostAggregates(db, postCursor),
-		backfillProfileAggregates(db, profileCursor),
+		backfillPostAggregates(db, state.postCursor),
+		backfillProfileAggregates(db, state.profileCursor),
 	]);
-	await backfillPostValidation(db, validationOffset);
+	await backfillPostValidation(db, state.validationIndex);
 }
 
 void main();
@@ -189,7 +183,7 @@ async function backfillProfileAggregates({ db }: Database, cursor: string | null
 	try {
 		while (true) {
 			if (i >= batches) {
-				rowCount = await fastRowCount(db, "profile");
+				rowCount = await fastRowCount(db, "actor");
 				batches = Math.ceil(rowCount / limit);
 			}
 
@@ -254,17 +248,17 @@ async function backfillProfileAggregates({ db }: Database, cursor: string | null
       FROM batch_profiles;
 			`.execute(db);
 
+			console.timeEnd(`backfilling profiles ${i + 1}/${batches}`);
+
 			if (inserted.rows.length === 0) break;
 			// @ts-expect-error — row is not typed
 			if (inserted.rows[0].processed_count === 0) break;
 			// @ts-expect-error — row is not typed
       cursor = inserted.rows[0].next_cursor;
-
-			console.timeEnd(`backfilling posts ${i + 1}/${batches}`);
 			i++;
 		}
 	} catch (err) {
-		console.error(`backfilling posts ${i + 1}/${batches}`, err);
+		console.error(`backfilling profiles ${i + 1}/${batches}`, err);
 		if (err instanceof Error && err.stack) console.error(err.stack);
 	}
 }
