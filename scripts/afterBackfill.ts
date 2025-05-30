@@ -36,7 +36,11 @@ for (const envVar of ["BSKY_DB_POSTGRES_URL", "BSKY_DB_POSTGRES_SCHEMA", "BSKY_D
 }
 
 const statePath = path.join(process.cwd(), "after-backfill-state.json");
-let state: State = { post: { cursor: null, index: 0 }, profile: { cursor: null, index: 0 }, validation: { cursor: null, index: 0 } };
+let state: State = {
+	post: { cursor: null, index: 0 },
+	profile: { cursor: null, index: 0 },
+	validation: { cursor: null, index: 0 },
+};
 
 const POOL_SIZE = 10;
 
@@ -61,57 +65,54 @@ async function main() {
 
 	console.log("beginning backfill...");
 
-  await retryInParallel(
-    ["post", backfillPostAggregates(db, state)],
-    ["profile", backfillProfileAggregates(db, state)],
-    ["post validation", backfillPostValidation(db, state)]
-  );
+	await retryInParallel(["post", backfillPostAggregates(db, state)], [
+		"profile",
+		backfillProfileAggregates(db, state),
+	], ["post validation", backfillPostValidation(db, state)]);
 }
 
 void main();
 
-async function retryInParallel(
-  ...fns: Array<[string, AsyncGenerator<string>]>
-) {
-  const retries = 5;
-  return new Promise<void>((resolve) => {
-    let completed = 0;
-    const errored: Array<[string, string]> = [];
+async function retryInParallel(...fns: Array<[string, AsyncGenerator<string>]>) {
+	const retries = 5;
+	return new Promise<void>((resolve) => {
+		let completed = 0;
+		const errored: Array<[string, string]> = [];
 
-    for (const [fnName, fn] of fns) {
-      (async () => {
-        let lastErroredCursors: Array<string> = [];
-        let done = false, cursor: string | undefined;
-        while (!done) {
-         try {
-           ({ done = false, value: cursor } = await fn.next());
-         } catch (err) {
-            console.error(`error in ${fnName}:`, err);
-            if (lastErroredCursors.length < retries) {
-              lastErroredCursors.push(cursor ?? "");
-              continue;
-            } else if (cursor !== lastErroredCursors.at(-1)) {
-              console.error(`retrying cursor ${cursor} for ${fnName}`);
-              lastErroredCursors = [cursor ?? ""];
-            }
-            console.error(`max retries reached for ${fnName} at cursor ${cursor}`);
-            errored.push([fnName, cursor ?? ""]);
-            done = true;
-          }
-        }
-        completed++;
-        if (completed === fns.length) {
-          console.log("aggregate backfill completed successfully");
-          if (errored.length > 0) {
-            console.error("some functions errored:", errored);
-          } else {
-            console.log("no errors occurred");
-          }
-          resolve();
-        }
-      })();
-    }
-  })
+		for (const [fnName, fn] of fns) {
+			(async () => {
+				let lastErroredCursors: Array<string> = [];
+				let done = false, cursor: string | undefined;
+				while (!done) {
+					try {
+						({ done = false, value: cursor } = await fn.next());
+					} catch (err) {
+						console.error(`error in ${fnName}:`, err);
+						if (lastErroredCursors.length < retries) {
+							lastErroredCursors.push(cursor ?? "");
+							continue;
+						} else if (cursor !== lastErroredCursors.at(-1)) {
+							console.error(`retrying cursor ${cursor} for ${fnName}`);
+							lastErroredCursors = [cursor ?? ""];
+						}
+						console.error(`max retries reached for ${fnName} at cursor ${cursor}`);
+						errored.push([fnName, cursor ?? ""]);
+						done = true;
+					}
+				}
+				completed++;
+				if (completed === fns.length) {
+					console.log("aggregate backfill completed successfully");
+					if (errored.length > 0) {
+						console.error("some functions errored:", errored);
+					} else {
+						console.log("no errors occurred");
+					}
+					resolve();
+				}
+			})();
+		}
+	});
 }
 
 async function* backfillPostAggregates({ db }: Database, state: State): AsyncGenerator<string> {
@@ -218,12 +219,12 @@ async function* backfillPostAggregates({ db }: Database, state: State): AsyncGen
 }
 
 async function* backfillProfileAggregates({ db }: Database, state: State): AsyncGenerator<string> {
-  const limit = 1_000;
+	const limit = 1_000;
 	let rowCount = await fastRowCount(db, "actor");
 	console.log(`actor row count: ${rowCount}`);
 
 	let batches = Math.ceil(rowCount / limit);
-  let i = state.profile.index ?? 0, cursor = state.profile.cursor ?? null;
+	let i = state.profile.index ?? 0, cursor = state.profile.cursor ?? null;
 	try {
 		while (true) {
 			if (i >= batches) {
@@ -298,7 +299,7 @@ async function* backfillProfileAggregates({ db }: Database, state: State): Async
 			// @ts-expect-error — row is not typed
 			if (inserted.rows[0].processed_count === 0) break;
 			// @ts-expect-error — row is not typed
-      yield cursor = inserted.rows[0].next_cursor;
+			yield cursor = inserted.rows[0].next_cursor;
 			i++;
 		}
 	} catch (err) {
@@ -311,7 +312,7 @@ async function* backfillPostValidation({ db }: Database, state: State): AsyncGen
 	const limit = 10_000;
 
 	let rowCount = await fastRowCount(db, "post");
-	console.log(`post row count: ${rowCount}`);
+	console.log(`post validation row count: ${rowCount}`);
 
 	let batches = Math.ceil(rowCount / limit);
 	let i = state.validation.index ?? 0, cursor = state.validation.cursor ?? null;
@@ -324,9 +325,11 @@ async function* backfillPostValidation({ db }: Database, state: State): AsyncGen
 
 			saveState((s) => ({ ...s, validation: { cursor, index: i } }));
 
-			const invalidReplyUpdates: Array<
-				[uri: string, invalidReplyRoot: boolean, violatesThreadGate: boolean]
-			> = [];
+			const invalidReplyUpdates: [
+				uri: Array<string>,
+				invalidReplyRoot: Array<boolean>,
+				violatesThreadGate: Array<boolean>,
+			] = [[], [], []];
 
 			console.time(`validating posts ${i + 1}/${batches}`);
 			const posts = await db.selectFrom("post").innerJoin(
@@ -341,12 +344,11 @@ async function* backfillPostValidation({ db }: Database, state: State): AsyncGen
 				"creator",
 				"uri",
 				"embed.embedUri as embedUri",
-			]).where("replyParent", "is not", null).where("replyRoot", "is not", null)
-			.where("uri", ">", cursor ?? "")
-			.orderBy(
+			]).where("replyParent", "is not", null).where("replyRoot", "is not", null).where(
 				"uri",
-				"asc",
-			).limit(limit).execute();
+				">",
+				cursor ?? "",
+			).orderBy("uri", "asc").limit(limit).execute();
 
 			if (posts.length === 0) break;
 
@@ -355,11 +357,11 @@ async function* backfillPostValidation({ db }: Database, state: State): AsyncGen
 			async function validateReplyStatus() {
 				console.time(`validating reply status ${i + 1}/${batches}`);
 
-				for (const post of posts) {
+				await Promise.all(posts.map(async (post) => {
 					if (
 						!post.replyParent || !post.replyParentCid || !post.replyRoot
 						|| !post.replyRootCid
-					) continue;
+					) return;
 					try {
 						const { invalidReplyRoot, violatesThreadGate } = await validateReply(
 							db,
@@ -370,17 +372,15 @@ async function* backfillPostValidation({ db }: Database, state: State): AsyncGen
 							},
 						);
 						if (invalidReplyRoot || violatesThreadGate) {
-							invalidReplyUpdates.push([
-								post.uri,
-								invalidReplyRoot,
-								violatesThreadGate,
-							]);
+							invalidReplyUpdates[0].push(post.uri);
+							invalidReplyUpdates[1].push(invalidReplyRoot);
+							invalidReplyUpdates[2].push(violatesThreadGate);
 						}
 					} catch (err) {
 						console.error(`validating post ${post.uri}`, err);
 						if (err instanceof Error && err.stack) console.error(err.stack);
 					}
-				}
+				}));
 
 				await executeRaw(
 					db,
@@ -401,9 +401,10 @@ async function* backfillPostValidation({ db }: Database, state: State): AsyncGen
 				console.time(`validating embedding rules ${i + 1}/${batches}`);
 
 				const embeds: Array<{ parentUri: string; embedUri: string }> = [];
-				const violatesEmbeddingRulesUpdates: Array<
-					[uri: string, embedUri: string, violatesEmbeddingRules: boolean]
-				> = [];
+				const violatesEmbeddingRulesUpdates: [
+					uri: Array<string>,
+					violatesEmbeddingRules: Array<boolean>,
+				] = [[], []];
 
 				for (const post of posts) {
 					if (post.embedUri) {
@@ -414,11 +415,8 @@ async function* backfillPostValidation({ db }: Database, state: State): AsyncGen
 				const embedsToUpdate = await validatePostEmbedsBulk(db, embeds);
 				for (const embed of embedsToUpdate) {
 					if (embed.violatesEmbeddingRules) {
-						violatesEmbeddingRulesUpdates.push([
-							embed.parentUri,
-							embed.embedUri,
-							embed.violatesEmbeddingRules,
-						]);
+						violatesEmbeddingRulesUpdates[0].push(embed.parentUri);
+						violatesEmbeddingRulesUpdates[1].push(embed.violatesEmbeddingRules);
 					}
 				}
 
@@ -438,7 +436,6 @@ async function* backfillPostValidation({ db }: Database, state: State): AsyncGen
 
 				console.timeEnd(`validating embedding rules ${i + 1}/${batches}`);
 			}
-
 
 			console.timeEnd(`validating posts ${i + 1}/${batches}`);
 			yield cursor = posts[posts.length - 1].uri;
@@ -567,23 +564,18 @@ function addExitHandlers(db: Database) {
 }
 
 interface State {
-	post: {
-	  cursor: string | null;
-    index: number;
-	}
-	profile: {
-	  cursor: string | null;
-    index: number;
-  }
-	validation: {
-	  cursor: string | null;
-    index: number;
-  }
+	post: { cursor: string | null; index: number };
+	profile: { cursor: string | null; index: number };
+	validation: { cursor: string | null; index: number };
 }
 
 function loadState(): State {
 	if (!fs.existsSync(statePath)) {
-		state = { post: { cursor: null, index: 0 }, profile: { cursor: null, index: 0 }, validation: { cursor: null, index: 0 } };
+		state = {
+			post: { cursor: null, index: 0 },
+			profile: { cursor: null, index: 0 },
+			validation: { cursor: null, index: 0 },
+		};
 		saveState((s) => s);
 		return state;
 	}
