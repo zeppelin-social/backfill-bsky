@@ -36,7 +36,7 @@ async function main() {
 				return r;
 			});
 		}
-		await indexingSvc.indexHandle(did, new Date().toISOString());
+    await indexingSvc.indexHandle(did, new Date().toISOString(), true);
 		await indexingSvc.indexRepo(did);
 	}
 }
