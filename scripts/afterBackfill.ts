@@ -66,9 +66,9 @@ async function main() {
 	console.log("beginning backfill...");
 
 	await retryInParallel(
-	  ["post", backfillPostAggregates(db, state)],
-	  ["profile", backfillProfileAggregates(db, state)],
-	  // ["post validation", backfillPostValidation(db, state)]
+		["post", backfillPostAggregates(db, state)],
+		["profile", backfillProfileAggregates(db, state)],
+		// ["post validation", backfillPostValidation(db, state)]
 	);
 }
 
