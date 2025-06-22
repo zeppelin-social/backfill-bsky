@@ -1,16 +1,28 @@
 # backfill-bsky
 
-Backfills a Bluesky AppView with historical commit data. This is expected to run on the same machine as the AppView, and will write directly to the database. Environment variables used are borrowed from [the bluesky-selfhost-env project](https://github.com/itaru2622/bluesky-selfhost-env/blob/467f060ab935d143096a7292c627a221cfef29b5/docker-compose.yaml#L294).
+Backfills a Bluesky AppView with historical commit data. This is expected to run on the same machine as the AppView, and will write directly to the database.
+
+### Environment variables
+
+- `BSKY_DB_POSTGRES_URL` — a Postgres connection string to the AppView database.
+- `BSKY_DB_POSTGRES_SCHEMA` — the schema name for the database; most likely `bsky`.
+- `BSKY_DID_PLC_URL` — the URL of the PLC directory to use for resolving DIDs. If you're self hosting a PLC mirror, this can be the mirror's URL; otherwise, it should be `https://plc.directory`.
+- (optional) `FALLBACK_PLC_URL` — the URL of a fallback PLC directory to use; you can set this to `https://plc.directory` if you're self hosting a PLC mirror.
+- `BUFFER_REPO_PROVIDER` — a `wss://` URL to the relay to buffer events from while backfilling.
 
 ## Steps
 
-0. Ensure AppView and BGS/relay are running, `pnpm build`.
-1. `pnpm request-crawl` — informs relay of all PDSes to be crawled to begin emitting events.
-	- Requires: `BSKY_REPO_PROVIDER`, `BGS_ADMIN_KEY`
-2. `pnpm buffer` — will run in the background until step 4 to buffer relay events while backfill is running.
-	- Requires: `BSKY_REPO_PROVIDER`
-3. `pnpm backfill` — will backfill the AppView historical commit data from all repos. Expected to take 15-18 hours as of Nov 26 2024 (~600k users per PDS on largest PDSes / 3000 requests per 300 seconds).
-   - Requires: `BSKY_DB_POSTGRES_URL`, `BSKY_DB_POSTGRES_SCHEMA`, `BSKY_REPO_PROVIDER`, `BSKY_DID_PLC_URL`
-4. `pnpm buffer:ingest` — will ingest the buffered relay data into the AppView.
-	- Requires: `BSKY_DB_POSTGRES_URL`, `BSKY_DB_POSTGRES_SCHEMA`, `BSKY_REPO_PROVIDER`, `BSKY_DID_PLC_URL`
-5. Restart AppView to start listening from the relay at cursor=0, filling in any gaps in the buffer within the relay replay window.
+0. Ensure the AppView is running.
+1. `bun drop-indexes` — will drop all indexes from the AppView database and log the command to recreate them to stdout and `create.sql`.
+    - Requires: `BSKY_DB_POSTGRES_URL`, `BSKY_DB_POSTGRES_SCHEMA`
+2. `bun buffer` — will run in the background until step 4 to buffer relay events while backfill is running.
+    - Requires: `BUFFER_REPO_PROVIDER` — a `wss://` URL to the relay.
+    - Recommended to run with `pm2` or `forever` to ensure it runs in the background.
+3. `bun backfill` — will backfill the AppView with historical commit data from all repos. Expected to take about 3 days as of May 31 2025.
+   - Requires: `BSKY_DB_POSTGRES_URL`, `BSKY_DB_POSTGRES_SCHEMA`, `BSKY_DID_PLC_URL`, (optional) `FALLBACK_PLC_URL`
+   - Recommended to run with `pm2` or `forever` to ensure it runs in the background.
+4. `bun create-indexes` — will recreate the indexes in the AppView database.
+    - Requires: `BSKY_DB_POSTGRES_URL`, `BSKY_DB_POSTGRES_SCHEMA`
+5. Restart the AppView to start listening from the relay at cursor=0, filling in any gaps in the buffer within the relay replay window.
+6. `bun buffer:ingest` — will ingest the buffered relay data into the AppView.
+    - Requires: `BSKY_DB_POSTGRES_URL`, `BSKY_DB_POSTGRES_SCHEMA`, `BSKY_DID_PLC_URL`
