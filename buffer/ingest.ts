@@ -4,7 +4,7 @@ import {
 	type FirehoseSubscriptionOptions,
 } from "@futur/bsky-indexer";
 import { TextLineStream } from "@std/streams/text-line-stream";
-import { Blob, Buffer } from "node:buffer";
+import { Buffer } from "node:buffer";
 import console from "node:console";
 import { readFileSync, writeFileSync } from "node:fs";
 import process from "node:process";
@@ -53,15 +53,7 @@ class FromBufferSubscription extends FirehoseSubscription {
 		private startPosition: number,
 		options: FirehoseSubscriptionOptions,
 	) {
-		const { dbOptions, idResolverOptions } = options;
-		const workerPath = new URL("./ingestWorker.ts", import.meta.url);
-		const workerBlob = new Blob([
-			readFileSync(workerPath),
-			`\nexport default new IngestWorker(${
-				JSON.stringify({ dbOptions, idResolverOptions })
-			});`,
-		], { type: "application/typescript" });
-		super(options, workerBlob);
+		super(options, new URL("./ingestWorker.ts", import.meta.url));
 	}
 
 	override async start() {
@@ -83,8 +75,9 @@ class FromBufferSubscription extends FirehoseSubscription {
 							Math.round(messagesSent / secondsSinceLastLog)
 						} per sec (${
 							Math.round((messagesProcessed / messagesSent) * 100)
-						}%) - ${sub.position}/~${lineCount} [${sub.pool.info.workerNodes} workers; ${sub.pool.info.queuedTasks} queued; ${sub.pool.info.executingTasks} executing]`,
+						}%) - ${sub.position}/~${lineCount} [${sub.info.workerNodes} workers; ${sub.info.queuedTasks} queued; ${sub.info.executingTasks} executing]`,
 					);
+					lastLog = Date.now();
 				}
 				setTimeout(logPosition, 30_000);
 			}, 30_000);
@@ -143,7 +136,7 @@ class FromBufferSubscription extends FirehoseSubscription {
 			this.onProcessed(res);
 			messagesProcessed++;
 		} catch (e) {
-			this.opts.onError?.(new FirehoseSubscriptionError(e));
+			this.subOpts.onError?.(new FirehoseSubscriptionError(e));
 		}
 	};
 
@@ -152,8 +145,7 @@ class FromBufferSubscription extends FirehoseSubscription {
 		await new Promise<void>((resolve) => {
 			const interval = setInterval(() => {
 				if (
-					!this.pool.info.queuedTasks
-					|| this.pool.info.queuedTasks < (FLUSH_EVERY_N_MESSAGES / 10)
+					!this.info.queuedTasks || this.info.queuedTasks < (FLUSH_EVERY_N_MESSAGES / 10)
 				) {
 					clearInterval(interval);
 					resolve();

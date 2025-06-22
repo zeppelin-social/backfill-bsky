@@ -1,10 +1,6 @@
-import { type Event, IndexerWorker, jsonToLex, type WorkerData } from "@futur/bsky-indexer";
+import { type Event, IndexerWorker, jsonToLex } from "@futur/bsky-indexer";
 
 class IngestWorker extends IndexerWorker {
-	constructor(options: WorkerData) {
-		super(options);
-	}
-
 	// @ts-expect-error — should make IndexerWorker generic so we can pass in string instead of Uint8Array
 	override process = async ({ line }: { line: string }) => {
 		try {
@@ -21,3 +17,5 @@ class IngestWorker extends IndexerWorker {
 		}
 	};
 }
+
+export default new IngestWorker();
