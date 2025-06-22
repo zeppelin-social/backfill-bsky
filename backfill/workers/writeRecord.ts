@@ -1,6 +1,8 @@
 import { MemoryCache } from "@atproto/identity";
+import { AtUri } from "@atproto/syntax";
 import { BackgroundQueue, Database } from "@futuristick/atproto-bsky";
 import { LRUCache } from "lru-cache";
+import { CID } from "multiformats/cid";
 import PQueue from "p-queue";
 import { IdResolver, IndexingService } from "../indexingService.js";
 import type { CommitMessage } from "./repo.js";
@@ -53,13 +55,16 @@ export async function writeRecordWorker() {
 		}
 
 		for (const commit of msg.commits) {
-			const { did, path, cid, timestamp, obj: obj } = commit;
-			if (!did || !path || !cid || !timestamp || !obj) {
+			const { did, path, cid: _cid, timestamp, obj: obj } = commit;
+			if (!did || !path || !_cid || !timestamp || !obj) {
 				throw new Error(`Invalid commit data ${JSON.stringify(commit)}`);
 			}
 
-			// jsonToLex unnecessary because the record just gets stringified
-			toIndexRecords.push({ did, path, cid, timestamp, obj });
+			const uri = new AtUri(`at://${did}/${path}`);
+			const cid = CID.parse(_cid);
+
+			// jsonToLex(obj) unnecessary because the record just gets stringified
+			toIndexRecords.push({ uri, cid, timestamp, obj });
 
 			if (!seenDids.has(did)) {
 				toIndexDids.add(did);
