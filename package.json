@@ -21,7 +21,6 @@
 		"@types/node": "^22.9.4",
 		"@types/pg": "^8.11.10",
 		"dprint": "^0.47.5",
-		"tsx": "^4.19.2",
 		"typescript": "^5.7.2"
 	},
 	"dependencies": {
@@ -38,16 +37,12 @@
 		"bee-queue": "^1.7.1",
 		"cacheable-lookup": "^7.0.0",
 		"cbor-x": "^1.6.0",
-		"crc-32": "^1.2.2",
-		"fastq": "^1.17.1",
 		"kysely": "^0.22.0",
 		"large-map": "^1.0.0",
 		"lru-cache": "^11.1.0",
 		"multiformats": "^13.3.1",
 		"p-queue": "^8.0.1",
 		"pg": "^8.13.1",
-		"shm-typed-array": "0.1.1",
 		"undici": "^6.21.0"
-	},
-	"packageManager": "pnpm@7.0.0-rc.3+sha256.8d1f9951a9723ce89b4834698a4ce8b67bbf38571fc0d1c847b328e0f98867df"
+	}
 }
