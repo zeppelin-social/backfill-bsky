@@ -143,6 +143,14 @@ export async function writeCollectionWorker() {
 			}
 		} catch (err) {
 			console.error(`Error processing queue for ${collections.join(", ")}`, err);
+			await Promise.all(
+				records.entries().map(([collection, recs]) =>
+					Bun.write(
+						`./failed-${collection}.jsonl`,
+						recs.map((r) => JSON.stringify(r)).join("\n"),
+					)
+				),
+			);
 			console.timeEnd(time);
 		}
 	}

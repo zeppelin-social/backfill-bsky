@@ -103,6 +103,10 @@ export async function writeRecordWorker() {
 			}
 		} catch (err) {
 			console.error(`Error processing queue`, err);
+			await Bun.write(
+				`./failed-records.jsonl`,
+				records.map((r) => JSON.stringify(r)).join("\n"),
+			);
 			console.timeEnd(time);
 		}
 	}
