@@ -3,8 +3,10 @@ import { simpleFetchHandler, XRPC } from "@atcute/client";
 import type { At } from "@atcute/client/lexicons";
 import { parse as parseTID } from "@atcute/tid";
 import { IdResolver, MemoryCache } from "@atproto/identity";
+import { AtUri } from "@atproto/syntax";
 import { BackgroundQueue, Database } from "@futuristick/atproto-bsky";
 import { IndexingService } from "@futuristick/atproto-bsky/dist/data-plane/server/indexing";
+import { CID } from "multiformats/cid";
 
 declare global {
 	namespace NodeJS {
@@ -56,8 +58,9 @@ async function main() {
 		return indexRepo(did, indexingSvc, spider);
 	}));
 
-	await Promise.all(aggregatesUpdates)
-    .catch((error) => console.error("failed to update aggregates", error));
+	await Promise.all(aggregatesUpdates).catch((error) =>
+		console.error("failed to update aggregates", error)
+	);
 }
 
 async function indexRepo(did: string, indexingSvc: IndexingService, spider = false) {
@@ -82,10 +85,10 @@ async function indexRepo(did: string, indexingSvc: IndexingService, spider = fal
 		aggregatesUpdates.push(
 			(indexingSvc.records.follow as any).params.updateAggregatesBulk?.(
 				indexingSvc.db.db,
-				follows.map(({ obj, did, cid, path, timestamp }) => ({
+				follows.map(({ obj, uri, cid, timestamp }) => ({
 					creator: did,
 					subjectDid: (obj as any).subject,
-					uri: `at://${did}/${path}`,
+					uri,
 					cid,
 					createdAt: timestamp,
 					indexedAt: timestamp,
@@ -95,10 +98,9 @@ async function indexRepo(did: string, indexingSvc: IndexingService, spider = fal
 		);
 	}
 
-	await Promise.all(promises)
-	.catch((error) => {
-	  console.error(`failed to index repo for ${did}`, error);
-  })
+	await Promise.all(promises).catch((error) => {
+		console.error(`failed to index repo for ${did}`, error);
+	});
 }
 
 async function getRepoRecords(did: string, indexingSvc: IndexingService) {
@@ -112,12 +114,10 @@ async function getRepoRecords(did: string, indexingSvc: IndexingService) {
 
 		const records: Record<
 			string,
-			Array<{ did: string; path: string; cid: string; timestamp: string; obj: unknown }>
+			Array<{ uri: AtUri; cid: CID; timestamp: string; obj: unknown }>
 		> = {};
 		const now = Date.now();
 		for await (const { record, rkey, collection, cid } of iterateAtpRepo(repo)) {
-			const path = `${collection}/${rkey}`;
-
 			let indexedAt: number =
 				(!!record && typeof record === "object" && "createdAt" in record
 					&& typeof record.createdAt === "string"
@@ -132,9 +132,8 @@ async function getRepoRecords(did: string, indexingSvc: IndexingService) {
 			if (indexedAt > now) indexedAt = now;
 
 			const data = {
-				did,
-				path,
-				cid: cid.$link,
+				uri: AtUri.make(did, collection, rkey),
+				cid: CID.parse(cid.$link),
 				timestamp: new Date(indexedAt).toISOString(),
 				obj: record,
 			};
