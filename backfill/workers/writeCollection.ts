@@ -1,3 +1,6 @@
+import { fromBytes } from "@atcute/cbor";
+import { isBlob, isBytes, isCidLink, isLegacyBlob } from "@atcute/lexicons/interfaces";
+import { isCid } from "@atcute/lexicons/syntax";
 import { MemoryCache } from "@atproto/identity";
 import { BlobRef } from "@atproto/lexicon";
 import { AtUri } from "@atproto/syntax";
@@ -170,39 +173,24 @@ export async function writeCollectionWorker() {
 
 export function jsonToLex(val: Record<string, unknown>): unknown {
 	try {
+		if (!val) return val;
 		// walk arrays
 		if (Array.isArray(val)) {
 			return val.map((item) => jsonToLex(item));
 		}
 		// objects
-		if (val && typeof val === "object") {
-			// check for dag json values
-			if (
-				"$link" in val && typeof val["$link"] === "string" && Object.keys(val).length === 1
-			) {
+		if (typeof val === "object") {
+			if (isCidLink(val)) {
 				return CID.parse(val["$link"]);
 			}
-			if ("bytes" in val && val["bytes"] instanceof Uint8Array) {
-				return CID.decode(val.bytes);
+			if (isBytes(val)) {
+				return fromBytes(val);
 			}
-			if (
-				val["$type"] === "blob"
-				|| (typeof val["cid"] === "string" && typeof val["mimeType"] === "string")
-			) {
-				if ("ref" in val && typeof val["size"] === "number") {
-					return new BlobRef(
-						CID.decode((val.ref as any).bytes),
-						val.mimeType as string,
-						val.size,
-					);
-				} else {
-					return new BlobRef(
-						CID.parse(val.cid as string),
-						val.mimeType as string,
-						-1,
-						val as never,
-					);
-				}
+			if (isLegacyBlob(val)) {
+				return new BlobRef(CID.parse(val.cid), val.mimeType, -1, val);
+			}
+			if (isBlob(val)) {
+				return new BlobRef(CID.parse(val.ref.$link), val.mimeType, val.size);
 			}
 			// walk plain objects
 			const toReturn: Record<string, unknown> = {};
@@ -211,6 +199,9 @@ export function jsonToLex(val: Record<string, unknown>): unknown {
 				toReturn[key] = jsonToLex(val[key]);
 			}
 			return toReturn;
+		}
+		if (isCid(val)) {
+			return CID.parse(val);
 		}
 	} catch {
 		// pass through
