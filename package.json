@@ -9,6 +9,7 @@
 		"buffer:ingest": "deno run --v8-flags=--max-old-space-size=65536 --env-file=.env -A buffer/ingest.ts",
 		"request-crawl": "bun --env-file=.env scripts/requestCrawlPdses.ts",
 		"index-repos": "bun --env-file=.env scripts/indexRepos.ts",
+		"index-profiles": "bun --env-file=.env scripts/indexProfiles.ts",
 		"create-indexes": "bun --env-file=.env scripts/createIndexes.ts",
 		"drop-indexes": "bun --env-file=.env scripts/dropIndexes.ts",
 		"fetch-dids": "bun --env-file=.env scripts/fetchDids.ts"
