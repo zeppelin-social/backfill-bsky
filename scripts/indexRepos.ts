@@ -7,6 +7,8 @@ import { AtUri } from "@atproto/syntax";
 import { BackgroundQueue, Database } from "@futuristick/atproto-bsky";
 import { IndexingService } from "@futuristick/atproto-bsky/dist/data-plane/server/indexing";
 import { CID } from "multiformats/cid";
+import { is } from "../backfill/util/lexicons";
+import { jsonToLex } from "../backfill/workers/writeCollection";
 
 declare global {
 	namespace NodeJS {
@@ -72,7 +74,7 @@ async function indexRepo(did: string, indexingSvc: IndexingService, spider = fal
 
 	const promises = [
 		indexingSvc.bulkIndexToRecordTable(records),
-		indexingSvc.bulkIndexToCollectionSpecificTables(collections),
+		indexingSvc.bulkIndexToCollectionSpecificTables(collections, { validate: false }), // validation occurs in getRepoRecords
 		indexingSvc.indexHandle(did, new Date().toISOString()),
 	];
 
@@ -118,6 +120,8 @@ async function getRepoRecords(did: string, indexingSvc: IndexingService) {
 		> = {};
 		const now = Date.now();
 		for await (const { record, rkey, collection, cid } of iterateAtpRepo(repo)) {
+			if (!is(collection, record)) continue;
+
 			let indexedAt: number =
 				(!!record && typeof record === "object" && "createdAt" in record
 					&& typeof record.createdAt === "string"
@@ -135,7 +139,7 @@ async function getRepoRecords(did: string, indexingSvc: IndexingService) {
 				uri: AtUri.make(did, collection, rkey),
 				cid: CID.parse(cid.$link),
 				timestamp: new Date(indexedAt).toISOString(),
-				obj: record,
+				obj: jsonToLex(record as Record<string, unknown>),
 			};
 
 			(records[collection] ??= []).push(data);

@@ -138,7 +138,11 @@ export async function writeCollectionWorker() {
 		try {
 			if (recordCount > 0) {
 				console.time(time);
-				await indexingSvc.bulkIndexToCollectionSpecificTables(records);
+				await indexingSvc.bulkIndexToCollectionSpecificTables(
+					records,
+					// Validation is done by the repo worker; avoids @atproto/* version mismatch false negatives
+					{ validate: false },
+				);
 				console.timeEnd(time);
 			}
 		} catch (err) {

@@ -4,6 +4,7 @@ import { createClient } from "@redis/client";
 import Queue from "bee-queue";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { is } from "../util/lexicons";
 
 export type CommitData = {
 	did: string;
@@ -55,6 +56,8 @@ export async function repoWorker() {
 		try {
 			const now = Date.now();
 			for await (const { record, rkey, collection, cid } of iterateAtpRepo(repo)) {
+				if (!is(collection, record)) continue; // This allows us to set { validate: false } in the collection worker
+
 				const path = `${collection}/${rkey}`;
 
 				// This should be the date the AppView saw the record, but since we don't want the "archived post" label

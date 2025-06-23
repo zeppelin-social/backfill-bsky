@@ -24,15 +24,17 @@
 		"typescript": "^5.7.2"
 	},
 	"dependencies": {
+		"@atcute/bluesky": "^3.1.3",
 		"@atcute/car": "^3.0.5",
 		"@atcute/client": "^2.0.7",
+		"@atcute/lexicons": "^1.1.0",
 		"@atcute/tid": "^1.0.2",
 		"@atproto/identity": "^0.4.8",
 		"@atproto/lexicon": "^0.4.6",
 		"@atproto/repo": "^0.6.4",
 		"@atproto/sync": "^0.1.13",
 		"@atproto/syntax": "^0.3.2",
-		"@futuristick/atproto-bsky": "0.0.162-insert-batching.0",
+		"@futuristick/atproto-bsky": "0.0.162-insert-batching.1",
 		"@redis/client": "^1.6.0",
 		"bee-queue": "^1.7.1",
 		"cacheable-lookup": "^7.0.0",
@@ -44,5 +46,6 @@
 		"p-queue": "^8.0.1",
 		"pg": "^8.13.1",
 		"undici": "^6.21.0"
-	}
+	},
+	"packageManager": "pnpm@7.0.0-rc.3+sha256.8d1f9951a9723ce89b4834698a4ce8b67bbf38571fc0d1c847b328e0f98867df"
 }
