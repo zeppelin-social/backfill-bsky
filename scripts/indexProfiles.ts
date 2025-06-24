@@ -1,3 +1,4 @@
+import { AppBskyActorProfile } from "@atcute/bluesky";
 import { simpleFetchHandler, XRPC } from "@atcute/client";
 import { IdResolver, MemoryCache } from "@atproto/identity";
 import { AtUri } from "@atproto/syntax";
@@ -40,7 +41,9 @@ async function main() {
 	// I don't like using bsky.social but it's convenient
 	const xrpc = new XRPC({ handler: simpleFetchHandler({ service: "https://bsky.social" }) });
 
-	const profiles: Array<{ uri: AtUri; cid: CID; obj: unknown; timestamp: string }> = [];
+	const profiles: Array<
+		{ uri: AtUri; cid: CID; obj: unknown; timestamp: string; record: AppBskyActorProfile.Main }
+	> = [];
 
 	await Promise.all(args.map(async (did) => {
 		if (!did.startsWith("did:")) {
@@ -54,18 +57,30 @@ async function main() {
 			params: { repo: did, collection: "app.bsky.actor.profile", rkey: "self" },
 		});
 		if (!is("app.bsky.actor.profile", profile.data.value)) return;
+
 		profiles.push({
 			uri: new AtUri(profile.data.uri),
 			cid: CID.parse(profile.data.cid!),
-			obj: jsonToLex(profile.data.value as Record<string, unknown>),
+			obj: jsonToLex(profile.data.value),
 			timestamp: profile.data.value.createdAt ?? new Date().toISOString(),
+			record: profile.data.value,
 		});
+
+		await Promise.all([
+			db.db.deleteFrom("record").where("uri", "=", profile.data.uri).execute(),
+			db.db.deleteFrom("profile").where("uri", "=", profile.data.uri).execute(),
+		]);
 	}));
 
-	await indexingSvc.bulkIndexToCollectionSpecificTables(
-		new Map([["app.bsky.actor.profile", profiles]]),
-		{ validate: false },
-	);
+	await Promise.all([
+		indexingSvc.bulkIndexToCollectionSpecificTables(
+			new Map([["app.bsky.actor.profile", profiles]]),
+			{ validate: false },
+		),
+		indexingSvc.bulkIndexToRecordTable(
+			profiles.map(({ obj: _obj, ...p }) => ({ ...p, obj: p.record })),
+		),
+	]);
 }
 
 void main();
