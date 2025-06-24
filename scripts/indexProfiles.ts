@@ -81,6 +81,28 @@ async function main() {
 			profiles.map(({ obj: _obj, ...p }) => ({ ...p, obj: p.record })),
 		),
 	]);
+	await Promise.all(
+		profiles.map(({ uri, cid, record, timestamp }) =>
+			indexingSvc.records.profile.aggregateOnCommit({
+				avatarCid: (record.avatar && "ref" in record.avatar
+					? record.avatar?.ref?.$link
+					: record.avatar?.cid) ?? null,
+				bannerCid: (record.banner && "ref" in record.banner
+					? record.banner?.ref?.$link
+					: record.banner?.cid) ?? null,
+				cid: cid.toString(),
+				uri: uri.toString(),
+				createdAt: timestamp,
+				indexedAt: timestamp,
+				creator: uri.host,
+				displayName: record.displayName ?? null,
+				description: record.description ?? null,
+				pinnedPost: record.pinnedPost?.uri ?? null,
+				pinnedPostCid: record.pinnedPost?.cid ?? null,
+				joinedViaStarterPackUri: record.joinedViaStarterPack?.uri ?? null,
+			})
+		),
+	);
 }
 
 void main();
