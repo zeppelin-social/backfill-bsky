@@ -30,13 +30,14 @@ async function main() {
 		schema: process.env.BSKY_DB_POSTGRES_SCHEMA,
 		poolSize: 100,
 	});
+	const background = new BackgroundQueue(db);
 
 	const idResolver = new IdResolver({
 		plcUrl: process.env.BSKY_DID_PLC_URL,
 		didCache: new MemoryCache(),
 	});
 
-	const indexingSvc = new IndexingService(db, idResolver, new BackgroundQueue(db));
+	const indexingSvc = new IndexingService(db, idResolver, background);
 
 	// I don't like using bsky.social but it's convenient
 	const xrpc = new XRPC({ handler: simpleFetchHandler({ service: "https://bsky.social" }) });
@@ -58,6 +59,8 @@ async function main() {
 		});
 		if (!is("app.bsky.actor.profile", profile.data.value)) return;
 
+		const uri = new AtUri(profile.data.uri);
+
 		profiles.push({
 			uri: new AtUri(profile.data.uri),
 			cid: CID.parse(profile.data.cid!),
@@ -69,6 +72,14 @@ async function main() {
 		await Promise.all([
 			db.db.deleteFrom("record").where("uri", "=", profile.data.uri).execute(),
 			db.db.deleteFrom("profile").where("uri", "=", profile.data.uri).execute(),
+			indexingSvc.db.transaction((db) => {
+				const idx = new IndexingService(db, idResolver, background);
+				// @ts-expect-error — fake follow just to update counts
+				idx.records.follow.aggregateOnCommit({ creator: uri.host, subjectDid: uri.host });
+				// @ts-expect-error — similarly, fake post
+				idx.records.post.aggregateOnCommit({ post: { creator: uri.host } });
+				return idx.background.processAll();
+			}),
 		]);
 	}));
 
@@ -80,29 +91,8 @@ async function main() {
 		indexingSvc.bulkIndexToRecordTable(
 			profiles.map(({ obj: _obj, ...p }) => ({ ...p, obj: p.record })),
 		),
+		indexingSvc.background.processAll(),
 	]);
-	await Promise.all(
-		profiles.map(({ uri, cid, record, timestamp }) =>
-			indexingSvc.records.profile.aggregateOnCommit({
-				avatarCid: (record.avatar && "ref" in record.avatar
-					? record.avatar?.ref?.$link
-					: record.avatar?.cid) ?? null,
-				bannerCid: (record.banner && "ref" in record.banner
-					? record.banner?.ref?.$link
-					: record.banner?.cid) ?? null,
-				cid: cid.toString(),
-				uri: uri.toString(),
-				createdAt: timestamp,
-				indexedAt: timestamp,
-				creator: uri.host,
-				displayName: record.displayName ?? null,
-				description: record.description ?? null,
-				pinnedPost: record.pinnedPost?.uri ?? null,
-				pinnedPostCid: record.pinnedPost?.cid ?? null,
-				joinedViaStarterPackUri: record.joinedViaStarterPack?.uri ?? null,
-			})
-		),
-	);
 }
 
 void main();
