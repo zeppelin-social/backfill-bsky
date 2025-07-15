@@ -120,7 +120,10 @@ async function getRepoRecords(did: string, indexingSvc: IndexingService) {
 		> = {};
 		const now = Date.now();
 		for await (const { record, rkey, collection, cid } of iterateAtpRepo(repo)) {
-			if (!is(collection, record)) continue;
+			if (!is(collection, record)) {
+				console.warn(`skipping invalid record at://${did}/${collection}/${rkey}`);
+				continue;
+			}
 
 			let indexedAt: number =
 				(!!record && typeof record === "object" && "createdAt" in record
