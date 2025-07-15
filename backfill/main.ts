@@ -6,7 +6,7 @@ import {
 	type XRPCRequestOptions,
 	type XRPCResponse,
 } from "@atcute/client";
-import * as bsky from "@futuristick/atproto-bsky";
+import * as bsky from "@zeppelin-social/bsky-backfill";
 import { createClient } from "@redis/client";
 import Queue from "bee-queue";
 import CacheableLookup from "cacheable-lookup";

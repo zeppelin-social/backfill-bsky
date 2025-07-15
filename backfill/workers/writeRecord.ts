@@ -1,6 +1,6 @@
 import { MemoryCache } from "@atproto/identity";
 import { AtUri } from "@atproto/syntax";
-import { BackgroundQueue, Database } from "@futuristick/atproto-bsky";
+import { BackgroundQueue, Database } from "@zeppelin-social/bsky-backfill";
 import { LRUCache } from "lru-cache";
 import { CID } from "multiformats/cid";
 import PQueue from "p-queue";

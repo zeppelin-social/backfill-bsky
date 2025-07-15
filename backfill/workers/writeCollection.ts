@@ -4,7 +4,7 @@ import { isCid } from "@atcute/lexicons/syntax";
 import { MemoryCache } from "@atproto/identity";
 import { BlobRef } from "@atproto/lexicon";
 import { AtUri } from "@atproto/syntax";
-import { BackgroundQueue, Database } from "@futuristick/atproto-bsky";
+import { BackgroundQueue, Database } from "@zeppelin-social/bsky-backfill";
 import { CID } from "multiformats/cid";
 import { IdResolver, IndexingService } from "../indexingService.js";
 import type { CommitMessage } from "./repo.js";

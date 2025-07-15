@@ -1,4 +1,4 @@
-import { Database } from "@futuristick/atproto-bsky";
+import { Database } from "@zeppelin-social/bsky-backfill";
 import { readFileSync } from "node:fs";
 
 const db = new Database({

@@ -1,8 +1,8 @@
 import { simpleFetchHandler, XRPC } from "@atcute/client";
 import { MemoryCache } from "@atproto/identity";
 import { AtUri } from "@atproto/syntax";
-import { BackgroundQueue, Database } from "@futuristick/atproto-bsky";
-import { IndexingService } from "@futuristick/atproto-bsky/dist/data-plane/server/indexing";
+import { BackgroundQueue, Database } from "@zeppelin-social/bsky-backfill";
+import { IndexingService } from "@zeppelin-social/bsky-backfill/dist/data-plane/server/indexing";
 import { sql } from "kysely";
 import { CID } from "multiformats/cid";
 import PQueue from "p-queue";

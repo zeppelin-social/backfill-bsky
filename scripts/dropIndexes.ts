@@ -1,4 +1,4 @@
-import { Database } from "@futuristick/atproto-bsky";
+import { Database } from "@zeppelin-social/bsky-backfill";
 import { writeFileSync } from "node:fs";
 
 const db = new Database({
