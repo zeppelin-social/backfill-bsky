@@ -101,6 +101,8 @@ if (cluster.isWorker) {
 		void writeCollectionWorker();
 	} else if (process.env.WORKER_KIND === "writeRecord") {
 		void writeRecordWorker();
+	} else if (process.env.WORKER_KIND === "opensearch") {
+		void openSearchWorker();
 	} else {
 		throw new Error(`Unknown worker kind: ${process.env.WORKER_KIND}`);
 	}
