@@ -9,6 +9,9 @@ Backfills a Bluesky AppView with historical commit data. This is expected to run
 - `BSKY_DID_PLC_URL` — the URL of the PLC directory to use for resolving DIDs. If you're self hosting a PLC mirror, this can be the mirror's URL; otherwise, it should be `https://plc.directory`.
 - (optional) `FALLBACK_PLC_URL` — the URL of a fallback PLC directory to use; you can set this to `https://plc.directory` if you're self hosting a PLC mirror.
 - `BUFFER_REPO_PROVIDER` — a `wss://` URL to the relay to buffer events from while backfilling.
+- `OPENSEARCH_URL` — an optional URL to an OpenSearch instance to backfill as well.
+- `OPENSEARCH_USERNAME` — a username to authenticate with OpenSearch. If you're running [zeppelin-social/bluesky-appview](https://github.com/zeppelin-social/bluesky-appview), this is probably `admin`.
+- `OPENSEARCH_PASSWORD` — a password to authenticate with OpenSearch.
 
 ## Steps
 
@@ -19,7 +22,7 @@ Backfills a Bluesky AppView with historical commit data. This is expected to run
     - Requires: `BUFFER_REPO_PROVIDER` — a `wss://` URL to the relay.
     - Recommended to run with `pm2` or `forever` to ensure it runs in the background.
 3. `bun backfill` — will backfill the AppView with historical commit data from all repos. Expected to take about 3 days as of May 31 2025.
-   - Requires: `BSKY_DB_POSTGRES_URL`, `BSKY_DB_POSTGRES_SCHEMA`, `BSKY_DID_PLC_URL`, (optional) `FALLBACK_PLC_URL`
+   - Requires: `BSKY_DB_POSTGRES_URL`, `BSKY_DB_POSTGRES_SCHEMA`, `BSKY_DID_PLC_URL`, (optional) `FALLBACK_PLC_URL`, (optional) `OPENSEARCH_URL`, (optional) `OPENSEARCH_USERNAME`, (optional) `OPENSEARCH_PASSWORD`
    - Recommended to run with `pm2` or `forever` to ensure it runs in the background.
 4. `bun create-indexes` — will recreate the indexes in the AppView database.
     - Requires: `BSKY_DB_POSTGRES_URL`, `BSKY_DB_POSTGRES_SCHEMA`
