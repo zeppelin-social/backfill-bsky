@@ -1,4 +1,5 @@
 import { MemoryCache } from "@atproto/identity";
+import { lexToJson } from "@atproto/lexicon";
 import { AtUri } from "@atproto/syntax";
 import { BackgroundQueue, Database } from "@zeppelin-social/bsky-backfill";
 import { LRUCache } from "lru-cache";

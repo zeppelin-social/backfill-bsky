@@ -315,7 +315,9 @@ if (cluster.isWorker) {
 			worker.send({ type: "shutdown" });
 		}
 
-		if (workers.openSearch) cluster.workers?.[workers.openSearch.id]?.send({ type: "shutdown" });
+		if (workers.openSearch) {
+			cluster.workers?.[workers.openSearch.id]?.send({ type: "shutdown" });
+		}
 
 		// Wait for all workers to report completion or timeout
 		const timeoutPromise = new Promise((resolve) => setTimeout(resolve, 60_000));

@@ -15,8 +15,8 @@ import {
 	AppBskyGraphStarterpack,
 	AppBskyGraphVerification,
 	AppBskyLabelerService,
-	ChatBskyActorDeclaration,
 	AppBskyNotificationDeclaration,
+	ChatBskyActorDeclaration,
 } from "@atcute/bluesky";
 import { type InferOutput, is as lexIs } from "@atcute/lexicons";
 
@@ -38,7 +38,7 @@ export const lexicons = {
 	"app.bsky.graph.verification": AppBskyGraphVerification.mainSchema,
 	"app.bsky.labeler.service": AppBskyLabelerService.mainSchema,
 	"chat.bsky.actor.declaration": ChatBskyActorDeclaration.mainSchema,
-	"app.bsky.notification.declaration": AppBskyNotificationDeclaration.mainSchema
+	"app.bsky.notification.declaration": AppBskyNotificationDeclaration.mainSchema,
 };
 
 export function is<T extends keyof typeof lexicons>(
