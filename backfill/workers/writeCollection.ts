@@ -2,7 +2,7 @@ import { fromBytes } from "@atcute/cbor";
 import { isBlob, isBytes, isCidLink, isLegacyBlob } from "@atcute/lexicons/interfaces";
 import { isCid } from "@atcute/lexicons/syntax";
 import { MemoryCache } from "@atproto/identity";
-import { BlobRef } from "@atproto/lexicon";
+import { BlobRef, lexToJson } from "@atproto/lexicon";
 import { AtUri } from "@atproto/syntax";
 import { BackgroundQueue, Database } from "@zeppelin-social/bsky-backfill";
 import { CID } from "multiformats/cid";
@@ -155,7 +155,14 @@ export async function writeCollectionWorker() {
 				records.entries().map(([collection, recs]) =>
 					Bun.write(
 						`./failed-${collection}.jsonl`,
-						recs.map((r) => JSON.stringify(r)).join("\n"),
+						recs.map((r) =>
+							JSON.stringify({
+								uri: r.uri.toString(),
+								cid: r.cid.toString(),
+								timestamp: r.timestamp,
+								obj: lexToJson(r.obj),
+							})
+						).join("\n") + "\n",
 					)
 				),
 			);

@@ -120,7 +120,7 @@ export async function openSearchWorker() {
 			console.error(`Error processing OpenSearch queue`, err);
 			await Bun.write(
 				`./failed-search.jsonl`,
-				datasource.map((r) => JSON.stringify(r)).join("\n"),
+				datasource.map((r) => JSON.stringify(r)).join("\n") + "\n",
 			);
 			console.timeEnd(time);
 		}

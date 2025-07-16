@@ -105,7 +105,14 @@ export async function writeRecordWorker() {
 			console.error(`Error processing queue`, err);
 			await Bun.write(
 				`./failed-records.jsonl`,
-				records.map((r) => JSON.stringify(r)).join("\n"),
+				records.map((r) =>
+					JSON.stringify({
+						uri: r.uri.toString(),
+						cid: r.cid.toString(),
+						timestamp: r.timestamp,
+						obj: lexToJson(r.obj),
+					})
+				).join("\n") + "\n",
 			);
 			console.timeEnd(time);
 		}
@@ -127,10 +134,7 @@ export async function writeRecordWorker() {
 					console.timeEnd(time);
 				} catch (e) {
 					console.error(`Error while indexing actors: ${e}`);
-					await Bun.write(
-						`./failed-actors.jsonl`,
-						dids.join(",")
-					);
+					await Bun.write(`./failed-actors.jsonl`, dids.join(",") + "\n");
 				}
 			});
 		}
