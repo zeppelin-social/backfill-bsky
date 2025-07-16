@@ -32,6 +32,7 @@ export const writeWorkerAllocations = [[
 	"app.bsky.graph.follow",
 	"app.bsky.graph.listitem",
 	"app.bsky.graph.listblock",
+	"app.bsky.notification.declaration"
 ]];
 
 export async function writeCollectionWorker() {
