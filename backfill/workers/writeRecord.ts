@@ -36,7 +36,7 @@ export async function writeRecordWorker() {
 		setTimeout(forceGC, 30_000);
 	}, 30_000);
 
-	const seenDids = new LRUCache<string, boolean>({ max: 10_000 });
+	const seenDids = new LRUCache<string, boolean>({ max: 100_000 });
 	const toIndexDids = new Set<string>();
 	const indexActorQueue = new PQueue({ concurrency: 2 });
 
@@ -127,6 +127,10 @@ export async function writeRecordWorker() {
 					console.timeEnd(time);
 				} catch (e) {
 					console.error(`Error while indexing actors: ${e}`);
+					await Bun.write(
+						`./failed-actors.jsonl`,
+						dids.join(",")
+					);
 				}
 			});
 		}

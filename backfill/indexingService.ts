@@ -10,30 +10,37 @@ import { copyIntoTable } from "@zeppelin-social/bsky-backfill/dist/data-plane/se
 import { setTimeout as sleep } from "node:timers/promises";
 import PQueue from "p-queue";
 
+type ActorToIndex = { did: string; handle: string; indexedAt: string };
+
 export class IndexingService extends IdxService {
 	override idResolver = new IdResolver();
 
-	async indexActorsBulk(dids: Array<string>): Promise<void> {
-		const actors: Array<{ did: string; handle: string; indexedAt: string }> = [];
+	async indexActorsBulk(dids: string[]): Promise<void> {
+		const actors: ActorToIndex[] = [];
+		const toRetry: string[] = [];
 		const now = new Date().toISOString();
 
 		let aborted = false;
 		const queue = new PQueue({ concurrency: 50 });
 		await queue.addAll(dids.map((did) => async () => {
 			try {
-				if (aborted) return;
-				const handle = await this.idResolver.resolveHandleCheck(did);
+				if (aborted) return toRetry.push(did);
+				const handle = await this.idResolver.resolveHandleNoCheck(did);
 				if (handle) actors.push({ did, handle, indexedAt: now });
 			} catch (err) {
-				if (err instanceof Error && "status" in err && err.status === 429) aborted = true;
+				if (err instanceof Error && "status" in err && err.status === 429) {
+					aborted = true;
+					toRetry.push(did);
+				}
 			}
 		}));
-		if (aborted) {
-			await sleep(60_000);
-			return await this.indexActorsBulk(dids);
-		}
 
 		await copyIntoTable(this.db.pool, "actor", ["did", "handle", "indexedAt"], actors);
+
+		if (aborted) {
+			await sleep(60_000);
+			return await this.indexActorsBulk(toRetry);
+		}
 	}
 }
 
@@ -45,24 +52,12 @@ export class IdResolver extends _IdResolver {
 		}
 	}
 
-	async resolveHandleCheck(did: string): Promise<string | null> {
-		// Try resolving did to handle, then handle back to did, and return resolved handle if they match
+	async resolveHandleNoCheck(did: string): Promise<string | null> {
+		// This would ideally query the handle URL to make sure it points back to the DID,
+		// but an extra query per DID is expensive. Duplicate actors will fail insertion
+		// and be re-indexed by the AppView whenever they next update their identity.
 		const atpData = await this.did.resolveAtprotoData(did, true);
-		const handleToDid = await this.handle.resolve(atpData.handle);
-		let handle = did === handleToDid ? atpData.handle.toLowerCase() : null;
-
-		// If they don't match, try doing the same thing with the fallback PLC resolver
-		if (handle === null) {
-			const fallbackAtpData = await this.did.methods.fallbackPlc.resolveAtprotoData(
-				did,
-				true,
-			);
-			// If it returns the same handle as the primary PLC resolver, we know it won't match
-			if (fallbackAtpData.handle === atpData.handle) return null;
-			const fallbackHandleToDid = await this.handle.resolve(fallbackAtpData.handle);
-			if (did === fallbackHandleToDid) handle = fallbackAtpData.handle.toLowerCase();
-		}
-
+		const handle = atpData.handle.toLowerCase();
 		return handle;
 	}
 }
