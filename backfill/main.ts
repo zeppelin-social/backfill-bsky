@@ -6,8 +6,8 @@ import {
 	type XRPCRequestOptions,
 	type XRPCResponse,
 } from "@atcute/client";
-import * as bsky from "@zeppelin-social/bsky-backfill";
 import { createClient } from "@redis/client";
+import * as bsky from "@zeppelin-social/bsky-backfill";
 import Queue from "bee-queue";
 import CacheableLookup from "cacheable-lookup";
 import { DecoderStream } from "cbor-x";
@@ -19,6 +19,7 @@ import path from "node:path";
 import PQueue from "p-queue";
 import { Agent, RetryAgent, setGlobalDispatcher } from "undici";
 import { sleep } from "./util/fetch.js";
+import { openSearchWorker } from "./workers/opensearch.js";
 import { type CommitMessage, repoWorker } from "./workers/repo.js";
 import { writeCollectionWorker, writeWorkerAllocations } from "./workers/writeCollection.js";
 import { writeRecordWorker } from "./workers/writeRecord.js";
@@ -32,6 +33,9 @@ declare global {
 			BSKY_DB_POSTGRES_SCHEMA: string;
 			BSKY_DID_PLC_URL: string;
 			FALLBACK_PLC_URL?: string;
+			OPENSEARCH_URL: string;
+			OPENSEARCH_USERNAME: string;
+			OPENSEARCH_PASSWORD: string;
 		}
 	}
 }
@@ -40,7 +44,14 @@ for (const envVar of ["BSKY_DB_POSTGRES_URL", "BSKY_DB_POSTGRES_SCHEMA", "BSKY_D
 	if (!process.env[envVar]) throw new Error(`Missing env var ${envVar}`);
 }
 
-for (const envVar of ["FALLBACK_PLC_URL"]) {
+for (
+	const envVar of [
+		"FALLBACK_PLC_URL",
+		"OPENSEARCH_URL",
+		"OPENSEARCH_USERNAME",
+		"OPENSEARCH_PASSWORD",
+	]
+) {
 	if (!process.env[envVar]) console.warn(`Missing optional env var ${envVar}`);
 }
 
@@ -121,11 +132,13 @@ if (cluster.isWorker) {
 		writeCollection: {},
 		writeRecord: { pid: 0, id: 0 },
 		writeRecord2: { pid: 0, id: 0 },
+		openSearch: { pid: 0, id: 0 },
 	} as {
 		repo: Record<number, { kind: "repo" }>;
 		writeCollection: Record<number, { kind: "writeCollection"; index: number }>;
 		writeRecord: { pid: number; id: number };
 		writeRecord2: { pid: number; id: number };
+		openSearch?: { pid: number; id: number };
 	};
 
 	const collectionToWriteWorkerId = new Map<string, number>();
@@ -192,6 +205,25 @@ if (cluster.isWorker) {
 		spawnRepoWorker();
 	}
 
+	// Initialize OpenSearch worker
+	const spawnOpenSearchWorker = () => {
+		if (
+			!process.env.OPENSEARCH_URL || !process.env.OPENSEARCH_USERNAME
+			|| !process.env.OPENSEARCH_PASSWORD
+		) return;
+
+		const worker = cluster.fork({ WORKER_KIND: "opensearch" });
+		if (!worker.process?.pid) throw new Error("Worker process not found");
+		workers.openSearch!.pid = worker.process.pid;
+		workers.openSearch!.id = worker.id;
+		worker.on("error", (err) => {
+			console.error(`OpenSearch worker error: ${err}`);
+			worker.kill();
+			cluster.fork({ WORKER_KIND: "opensearch" });
+		});
+	};
+	spawnOpenSearchWorker();
+
 	let isShuttingDown = false;
 
 	cluster.on("exit", handleWorkerExit);
@@ -222,6 +254,13 @@ if (cluster.isWorker) {
 
 		writeRecordWorker!.send(message);
 		writeCollectionWorker!.send(message);
+		if (
+			workers.openSearch
+			&& (message.collection === "app.bsky.feed.post"
+				|| message.collection === "app.bsky.actor.profile")
+		) {
+			cluster.workers?.[workers.openSearch.id]?.send(message);
+		}
 	});
 
 	process.on("beforeExit", async () => {
@@ -275,6 +314,8 @@ if (cluster.isWorker) {
 			if (!worker) continue;
 			worker.send({ type: "shutdown" });
 		}
+
+		if (workers.openSearch) cluster.workers?.[workers.openSearch.id]?.send({ type: "shutdown" });
 
 		// Wait for all workers to report completion or timeout
 		const timeoutPromise = new Promise((resolve) => setTimeout(resolve, 60_000));
@@ -457,6 +498,8 @@ if (cluster.isWorker) {
 			spawnWriteRecordWorker();
 		} else if (pid in workers.repo) {
 			spawnRepoWorker();
+		} else if (pid === workers.openSearch?.pid) {
+			spawnOpenSearchWorker();
 		} else {
 			console.error(`Unknown worker kind: ${pid}`);
 		}
