@@ -17,7 +17,7 @@ export async function* fetchAllDids() {
 	const pdses = await fetchPdses();
 
 	const cursors = getPdsCursorCache();
-	const pdsesToFetchFrom = pdses.filter(pds => cursors[pds] !== "DONE");
+	const pdsesToFetchFrom = pdses.filter((pds) => cursors[pds] !== "DONE");
 
 	yield* roundRobinInterleaveIterators(pdsesToFetchFrom.map(fetchPdsDids));
 }

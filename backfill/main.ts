@@ -287,6 +287,10 @@ if (cluster.isWorker) {
 			cluster.workers?.[workers.openSearch.id]?.send({ type: "shutdown" });
 		}
 
+		if (failedMessages?.size) {
+			await fs.writeFile("./failed-worker-messages.jsonl", JSON.stringify([...failedMessages.keys()]))
+		}
+
 		// Wait for all workers to report completion or timeout
 		const timeoutPromise = new Promise((resolve) => setTimeout(resolve, 60_000));
 		const completionPromise = new Promise((resolve) => {
@@ -404,6 +408,7 @@ if (cluster.isWorker) {
 					await Bun.write(path.join(REPOS_DIR, did), repo);
 					await queue.createJob({ did }).setId(did).save();
 					fetchedOverInterval++;
+					repo.fill(0, 0, -1);
 				}
 			} catch (err) {
 				if (
