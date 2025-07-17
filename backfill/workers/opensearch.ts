@@ -156,8 +156,11 @@ function transformProfile(profile: AppBskyActorProfile.Main, did: Did, cid: stri
 }
 
 function transformPost(post: AppBskyFeedPost.Main, did: Did, rkey: string, cid: string): PostDoc {
+	const has = new Set<string>();
+
 	const altText: string[] = [];
 	if (post.embed?.$type === "app.bsky.embed.images") {
+		has.add("image");
 		for (const img of post.embed.images) {
 			if (img.alt) {
 				altText.push(img.alt);
@@ -177,9 +180,11 @@ function transformPost(post: AppBskyFeedPost.Main, did: Did, rkey: string, cid: 
 	for (const facet of post.facets || []) {
 		for (const feat of facet.features) {
 			if (feat.$type === "app.bsky.richtext.facet#mention") {
+				has.add("mention");
 				mentionDIDs.push(feat.did);
 			}
 			if (feat.$type === "app.bsky.richtext.facet#link") {
+				has.add("link");
 				urls.push(feat.uri);
 			}
 		}
@@ -192,19 +197,23 @@ function transformPost(post: AppBskyFeedPost.Main, did: Did, rkey: string, cid: 
 		if (parsedATURI.ok) parentDID = parsedATURI.value.repo;
 	}
 	if (post.embed?.$type === "app.bsky.embed.external") {
+		has.add("link");
 		urls.push(post.embed.external.uri);
 	}
 	let embedATURI: string | undefined;
 	if (post.embed?.$type === "app.bsky.embed.record") {
+		has.add("quote");
 		embedATURI = post.embed.record.uri;
 	}
 	if (post.embed?.$type === "app.bsky.embed.recordWithMedia") {
+		has.add("quote");
 		embedATURI = post.embed.record.record.uri;
 	}
 	let embedImgCount = 0;
 	const embedImgAltText: string[] = [];
 	const embedImgAltTextJA: string[] = [];
 	if (post.embed?.$type === "app.bsky.embed.images") {
+		has.add("image");
 		embedImgCount = post.embed.images.length;
 		for (const img of post.embed.images) {
 			if (img.alt) {
@@ -216,7 +225,8 @@ function transformPost(post: AppBskyFeedPost.Main, did: Did, rkey: string, cid: 
 		}
 	}
 
-	if (post.embed?.$type === "app.bsky.embed.video" && post.embed.alt) {
+	if (post.embed?.$type === "app.bsky.embed.video") {
+		has.add("video");
 		embedImgCount = 1;
 		if (post.embed?.alt) {
 			embedImgAltText.push(post.embed.alt);
@@ -230,6 +240,7 @@ function transformPost(post: AppBskyFeedPost.Main, did: Did, rkey: string, cid: 
 		post.embed?.$type === "app.bsky.embed.external"
 		&& post.embed.external.uri.startsWith("https://media.tenor.com")
 	) {
+		has.add("gif");
 		embedImgCount = 1;
 		const alt = post.embed.external.description;
 		if (alt) {
@@ -244,6 +255,7 @@ function transformPost(post: AppBskyFeedPost.Main, did: Did, rkey: string, cid: 
 		if (
 			post.embed.media.$type === "app.bsky.embed.images" && post.embed.media.images.length > 0
 		) {
+			has.add("image");
 			embedImgCount += post.embed.media.images.length;
 			for (const img of post.embed.media.images) {
 				if (img.alt) {
@@ -253,7 +265,8 @@ function transformPost(post: AppBskyFeedPost.Main, did: Did, rkey: string, cid: 
 					}
 				}
 			}
-		} else if (post.embed.media.$type === "app.bsky.embed.video" && post.embed.media.alt) {
+		} else if (post.embed.media.$type === "app.bsky.embed.video") {
+			has.add("video");
 			embedImgCount += 1;
 			const alt = post.embed.media.alt;
 			if (alt) {
@@ -299,6 +312,7 @@ function transformPost(post: AppBskyFeedPost.Main, did: Did, rkey: string, cid: 
 		domain: domains.length ? domains : undefined,
 		tag: parsePostTags(post),
 		emoji: parseEmojis(post.text),
+		has: has.size ? [...has] : undefined,
 	};
 
 	if (japaneseRegex.test(post.text)) {
@@ -467,4 +481,5 @@ type PostDoc = {
 	domain?: string[];
 	tag?: string[];
 	emoji?: string[];
+	has?: string[];
 };
