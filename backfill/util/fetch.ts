@@ -15,7 +15,7 @@ export async function fetchPdses(): Promise<Array<string>> {
 
 export async function* fetchAllDids() {
 	const pdses = await fetchPdses();
-	yield* interleaveIterators(pdses.map(fetchPdsDids));
+	yield* roundRobinInterleaveIterators(pdses.map(fetchPdsDids));
 }
 
 const listReposQueue = new PQueue({ concurrency: 25 });
@@ -211,37 +211,48 @@ async function processRatelimitHeaders(headers: Headers, url: string) {
 
 export const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// https://stackoverflow.com/a/50586391
-async function* interleaveIterators<T>(asyncIterators: Array<AsyncIterator<T>>) {
-	const results = [];
-	let count = asyncIterators.length;
-	const never = new Promise<never>(() => {});
-	function getNext(
-		it: AsyncIterator<T>,
-		index: number,
-	) {
-		return it.next().then((result) => ({ index, result }));
-	}
-	const nextPromises = asyncIterators.map(getNext);
-	try {
-		while (count) {
-			const { index, result } = await Promise.race(nextPromises);
-			if (result.done) {
-				nextPromises[index] = never;
-				results[index] = result.value;
-				count--;
-			} else {
-				nextPromises[index] = getNext(asyncIterators[index], index);
-				yield result.value;
-			}
+export async function* roundRobinInterleaveIterators<T>(
+	iterators: Array<AsyncIterator<T>>,
+	concurrency = 25,
+) {
+	const getNext = (it: AsyncIterator<T>, idx: number) => it.next().then((res) => ({ idx, res }));
+
+	// Queue of iterator indices waiting for their next turn
+	const pending: number[] = iterators.map((_, i) => i);
+
+	// Currently running promises and their associated iterator indices
+	const activePromises: Array<Promise<{ idx: number; res: IteratorResult<T> }>> = [];
+	const activeIdxs: number[] = [];
+
+	const launch = () => {
+		while (activePromises.length < concurrency && pending.length) {
+			const idx = pending.shift()!;
+			activeIdxs.push(idx);
+			activePromises.push(getNext(iterators[idx], idx));
 		}
-	} finally {
-		for (const [index, iterator] of asyncIterators.entries()) {
-			if (nextPromises[index] != never && iterator.return != null) {
-				iterator.return();
-			}
+	};
+
+	launch();
+
+	let notDoneIteratorCount = iterators.length;
+
+	while (notDoneIteratorCount > 0) {
+		const { idx, res } = await Promise.race(activePromises);
+
+		// Remove the settled promise from the active pools
+		const pos = activeIdxs.indexOf(idx);
+		activeIdxs.splice(pos, 1);
+		activePromises.splice(pos, 1);
+
+		if (res.done) {
+			notDoneIteratorCount--;
+		} else {
+			// Emit value and put this iterator at the back of the line
+			yield res.value;
+			pending.push(idx);
 		}
-		// no await here - see https://github.com/tc39/proposal-async-iteration/issues/126
+
+		// Top up the active promises pool to ensure we're operating at concurrency limit
+		launch();
 	}
-	return results;
 }
