@@ -324,19 +324,8 @@ function transformPost(post: AppBskyFeedPost.Main, did: Did, rkey: string, cid: 
 		try {
 			const dt = new Date(post.createdAt);
 			// not more than a few minutes in the future
-			if (!isNaN(dt.getTime()) && Math.abs(dt.getTime() - Date.now()) <= 5 * 60 * 1000) {
+			if (!isNaN(dt.getTime())) {
 				doc.created_at = dt.toISOString();
-			} else {
-				console.warn(
-					"rejecting future post createdAt",
-					"datetime",
-					dt.toString(),
-					"did",
-					did.toString(),
-					"rkey",
-					rkey,
-				);
-				doc.created_at = new Date().toISOString();
 			}
 		} catch (err) {
 			// ignore error
