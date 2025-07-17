@@ -228,40 +228,7 @@ if (cluster.isWorker) {
 
 	cluster.on("exit", handleWorkerExit);
 
-	cluster.on("message", (worker, message: WorkerMessage) => {
-		if (message.type === "shutdownComplete") {
-			if (!isShuttingDown) handleWorkerExit(worker, 0, "SIGINT");
-			if (!worker.process.killed) worker.kill();
-			return;
-		}
-
-		if (message?.type !== "commit" || !message.collection || !message.commits) {
-			throw new Error(`Received invalid worker message: ${JSON.stringify(message)}`);
-		}
-		if (!message.commits.length) return;
-
-		const writeCollectionWorkerId = collectionToWriteWorkerId.get(message.collection);
-		// Repos can contain non-Bluesky records, just ignore them
-		if (writeCollectionWorkerId === undefined) {
-			console.warn(`Received commit for unknown collection ${message.collection}`);
-			return;
-		}
-
-		const writeCollectionWorker = cluster.workers?.[writeCollectionWorkerId];
-		const writeRecordWorker = Math.random() < 0.5
-			? cluster.workers?.[workers.writeRecord.id]
-			: cluster.workers?.[workers.writeRecord2.id];
-
-		writeRecordWorker!.send(message);
-		writeCollectionWorker!.send(message);
-		if (
-			workers.openSearch
-			&& (message.collection === "app.bsky.feed.post"
-				|| message.collection === "app.bsky.actor.profile")
-		) {
-			cluster.workers?.[workers.openSearch.id]?.send(message);
-		}
-	});
+	cluster.on("message", forwardMessageToWorkers);
 
 	process.on("beforeExit", async () => {
 		console.log("Resetting DB settings");
@@ -473,6 +440,48 @@ if (cluster.isWorker) {
 					await onRatelimit(waitTime);
 				}
 			}
+		}
+	}
+
+	const failedMessages = new Set<WorkerMessage>();
+	async function forwardMessageToWorkers(worker: Worker, message: WorkerMessage) {
+		if (message.type === "shutdownComplete") {
+			if (!isShuttingDown) handleWorkerExit(worker, 0, "SIGINT");
+			if (!worker.process.killed) worker.kill();
+			return;
+		}
+
+		if (message?.type !== "commit" || !message.collection || !message.commits) {
+			throw new Error(`Received invalid worker message: ${JSON.stringify(message)}`);
+		}
+		if (!message.commits.length) return;
+
+		const writeCollectionWorkerId = collectionToWriteWorkerId.get(message.collection);
+		// Repos can contain non-Bluesky records, just ignore them
+		if (writeCollectionWorkerId === undefined) {
+			console.warn(`Received commit for unknown collection ${message.collection}`);
+			return;
+		}
+
+		const writeCollectionWorker = cluster.workers?.[writeCollectionWorkerId];
+		const writeRecordWorker = Math.random() < 0.5
+			? cluster.workers?.[workers.writeRecord.id]
+			: cluster.workers?.[workers.writeRecord2.id];
+
+		try {
+			writeRecordWorker!.send(message);
+			writeCollectionWorker!.send(message);
+			if (
+				workers.openSearch
+				&& (message.collection === "app.bsky.feed.post"
+					|| message.collection === "app.bsky.actor.profile")
+			) {
+				cluster.workers?.[workers.openSearch.id]?.send(message);
+			}
+			failedMessages.delete(message);
+		} catch (e) {
+			console.warn(`Failed to forward message to workers, retrying: ${e}`);
+			failedMessages.add(message);
 		}
 	}
 
