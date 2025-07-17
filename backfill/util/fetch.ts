@@ -204,6 +204,7 @@ async function processRatelimitHeaders(headers: Headers, url: string) {
 				const cooldown = sleep(waitTime);
 				ratelimitCooldowns.set(url, cooldown);
 				await cooldown;
+				ratelimitCooldowns.delete(url);
 			}
 		}
 	}

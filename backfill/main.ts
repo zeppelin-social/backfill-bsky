@@ -10,6 +10,7 @@ import { createClient } from "@redis/client";
 import * as bsky from "@zeppelin-social/bsky-backfill";
 import Queue from "bee-queue";
 import CacheableLookup from "cacheable-lookup";
+import { LRUCache } from "lru-cache";
 import cluster, { type Worker } from "node:cluster";
 import fs from "node:fs/promises";
 import * as os from "node:os";
@@ -228,7 +229,7 @@ if (cluster.isWorker) {
 
 	cluster.on("exit", handleWorkerExit);
 
-	cluster.on("message", forwardMessageToWorkers);
+	cluster.on("message", handleWorkerMessage);
 
 	process.on("beforeExit", async () => {
 		console.log("Resetting DB settings");
@@ -336,9 +337,9 @@ if (cluster.isWorker) {
 			if (pds.includes("blueski.social")) continue;
 			if (seenDids.has(did)) continue;
 			await fetchQueue.onSizeLessThan(10_000);
-			void fetchQueue.add(() => queueRepo(pds, did)).catch((e) =>
+			void (fetchQueue.add(() => queueRepo(pds, did)).catch((e) =>
 				console.error(`Error queuing repo for ${did} `, e)
-			);
+			));
 		}
 	}
 
@@ -380,6 +381,7 @@ if (cluster.isWorker) {
 	}
 
 	const pdsQueues = new Map<string, PQueue>();
+	const pdsRpcs = new Map<string, WrappedRPC>();
 
 	async function queueRepo(pds: string, did: string) {
 		let pdsQueue = pdsQueues.get(pds);
@@ -390,7 +392,11 @@ if (cluster.isWorker) {
 
 		await pdsQueue.add(async () => {
 			try {
-				const rpc = new WrappedRPC(pds);
+				let rpc = pdsRpcs.get(pds);
+				if (!rpc) {
+					rpc = new WrappedRPC(pds);
+					pdsRpcs.set(pds, rpc);
+				}
 				const { data: repo } = await rpc.get("com.atproto.sync.getRepo", {
 					params: { did: did as `did:${string}` },
 				});
@@ -441,8 +447,8 @@ if (cluster.isWorker) {
 		}
 	}
 
-	const failedMessages = new Set<WorkerMessage>();
-	function forwardMessageToWorkers(worker: Worker, message: WorkerMessage) {
+	const failedMessages = new LRUCache<CommitMessage, true>({ max: 100_000 });
+	function handleWorkerMessage(worker: Worker, message: WorkerMessage) {
 		if (message.type === "shutdownComplete") {
 			if (!isShuttingDown) handleWorkerExit(worker, 0, "SIGINT");
 			if (!worker.process.killed) worker.kill();
@@ -452,6 +458,11 @@ if (cluster.isWorker) {
 		if (message?.type !== "commit" || !message.collection || !message.commits) {
 			throw new Error(`Received invalid worker message: ${JSON.stringify(message)}`);
 		}
+
+		forwardCommitToWorkers(message);
+	}
+
+	function forwardCommitToWorkers(message: CommitMessage) {
 		if (!message.commits.length) return;
 
 		const writeCollectionWorkerId = collectionToWriteWorkerId.get(message.collection);
@@ -479,13 +490,18 @@ if (cluster.isWorker) {
 			failedMessages.delete(message);
 		} catch (e) {
 			console.warn(`Failed to forward message to workers, retrying: ${e}`);
-			failedMessages.add(message);
-		}
-
-		for (const msg of failedMessages) {
-			forwardMessageToWorkers(worker, msg);
+			failedMessages.set(message, true);
 		}
 	}
+
+	setInterval(() => {
+		const messages = [...failedMessages.keys()];
+		failedMessages.clear();
+
+		for (const msg of messages) {
+			forwardCommitToWorkers(msg);
+		}
+	}, 5000);
 
 	function handleWorkerExit({ process: { pid } }: Worker, code: number, signal: string) {
 		console.warn(`Worker ${pid} exited with code ${code} and signal ${signal}`);

@@ -94,6 +94,7 @@ export async function repoWorker() {
 				await redis.sAdd("backfill:seen", did);
 			}
 		} finally {
+			new Uint8Array(repo.buffer).fill(0, 0, -1);
 			repo = null;
 			await fs.unlink(path.join(process.env.REPOS_DIR!, did));
 		}

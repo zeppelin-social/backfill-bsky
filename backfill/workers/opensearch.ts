@@ -104,7 +104,7 @@ export async function openSearchWorker() {
 		profileQueue = [];
 
 		try {
-			if (postQueue.length > 0 || profileQueue.length > 0) {
+			if (datasource.length > 0) {
 				console.time(time);
 				await client.helpers.bulk({
 					datasource,
