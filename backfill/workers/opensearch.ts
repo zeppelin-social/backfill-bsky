@@ -282,9 +282,9 @@ function transformPost(post: AppBskyFeedPost.Main, did: Did, rkey: string, cid: 
 
 	const domains: string[] = [];
 	for (let i = 0; i < urls.length; i++) {
-		const clean = normalizeLossyUrl(urls[i]);
-		urls[i] = clean;
 		try {
+			const clean = normalizeLossyUrl(urls[i]);
+			urls[i] = clean;
 			const u = new URL(clean);
 			domains.push(u.hostname);
 		} catch (err) {
@@ -363,11 +363,16 @@ const trackingParams = [
 ];
 
 function normalizeLossyUrl(raw: string): string {
-	const clean = normalizeUrl(raw, {
-		defaultProtocol: "https",
-		stripHash: true,
-		removeDirectoryIndex: true,
-	});
+	let clean;
+	try {
+		clean = normalizeUrl(raw, {
+			defaultProtocol: "https",
+			stripHash: true,
+			removeDirectoryIndex: true,
+		});
+	} catch {
+		return raw;
+	}
 	let url;
 	try {
 		url = new URL(clean);
