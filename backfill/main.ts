@@ -373,7 +373,7 @@ if (cluster.isWorker) {
 				void fetchQueue.add(() => queueRepo(pds, did)).catch((e) =>
 					console.error(`Error queuing repo for ${did} `, e)
 				);
-			}, () => fetchQueue.onSizeLessThan(100_000)); // only listRepos when we don't already have many queued
+			});
 		});
 	}
 

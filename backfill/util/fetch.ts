@@ -13,23 +13,20 @@ export async function fetchPdses(): Promise<Array<string>> {
 
 export async function fetchAllDids(
 	onDid: (did: string, pds: string) => void,
-	beforeFetch?: () => Promise<void>,
 ) {
 	const pdses = await fetchPdses();
-	await Promise.all(pdses.map((pds) => fetchPdsDids(pds, onDid, beforeFetch)));
+	await Promise.all(pdses.map((pds) => fetchPdsDids(pds, onDid)));
 }
 
 async function fetchPdsDids(
 	pds: string,
 	onDid: (did: string, pds: string) => void,
-	beforeFetch?: () => Promise<void>,
 ) {
 	const url = new URL(`/xrpc/com.atproto.sync.listRepos`, pds).href;
 	let cursor = "";
 	let fetched = 0;
 	while (true) {
 		try {
-			await beforeFetch?.();
 			const signal = AbortSignal.timeout(10_000);
 			const res = await fetch(url + "?limit=1000&cursor=" + cursor, { signal });
 			if (!res.ok) {
