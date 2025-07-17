@@ -15,14 +15,18 @@ export async function fetchPdses(): Promise<Array<string>> {
 
 export async function* fetchAllDids() {
 	const pdses = await fetchPdses();
-	yield* roundRobinInterleaveIterators(pdses.map(fetchPdsDids));
+
+	const cursors = getPdsCursorCache();
+	const pdsesToFetchFrom = pdses.filter(pds => cursors[pds] !== "DONE");
+
+	yield* roundRobinInterleaveIterators(pdsesToFetchFrom.map(fetchPdsDids));
 }
 
 const listReposQueue = new PQueue({ concurrency: 25 });
 
 async function* fetchPdsDids(pds: string) {
 	let cursor = getPdsCursorCache()?.[pds] ?? "";
-	if (cursor === "DONE") return console.warn(`Skipping exhaused PDS ${pds}`);
+	if (cursor === "DONE") return console.warn(`Skipping exhausted PDS ${pds}`);
 	const url = new URL(`/xrpc/com.atproto.sync.listRepos`, pds).href;
 	let fetched = 0;
 	while (true) {
@@ -92,39 +96,6 @@ async function* fetchPdsDids(pds: string) {
 	return fetched;
 }
 
-export async function getRepo(did: string, pds: string, attempt = 0): Promise<Uint8Array | null> {
-	const url = new URL(`/xrpc/com.atproto.sync.getRepo?did=${did}`, pds).href;
-
-	const cooldown = ratelimitCooldowns.get(url);
-	if (cooldown) await cooldown;
-
-	try {
-		const res = await fetch(url);
-		await processRatelimitHeaders(res.headers, url);
-		// 429 is already taken care of by processRatelimitHeaders
-		if (!res.ok && res.status !== 429) {
-			throw res;
-		}
-		return new Uint8Array(await res.arrayBuffer());
-	} catch (err: any) {
-		if (attempt > backoffs.length) throw err;
-
-		// 400 = RepoDeactivated, RepoTakendown, or RepoNotFound
-		if (err instanceof Response && err.status === 400) {
-			const body = await err.json() as { message?: string; error?: string };
-			console.error(body.message || body.error || `Unknown error for repo: ${did}`);
-			return null;
-		} else if (err instanceof TypeError || `${err}`.includes("Unable to connect")) {
-			console.warn(`fetch failed for ${url}, skipping`);
-			throw err;
-		}
-
-		await sleep(backoffs[attempt]);
-		console.warn(`retrying request to ${url}, on attempt ${attempt}`);
-		return getRepo(did, pds, attempt + 1);
-	}
-}
-
 // async function fetchPlcDids(map: Map<string, string> = new Map()): Promise<Map<string, string>> {
 // 	let cursor = "";
 // 	while (true) {
@@ -184,9 +155,6 @@ const getPdsCursorCache =
 const savePdsCursorCache = () =>
 	writeFileSync("./pds-cursor-cache.json", JSON.stringify(pdsCursorCache));
 
-const ratelimitCooldowns = new Map<string, Promise<unknown>>();
-const backoffs = [1_000, 5_000, 15_000, 30_000, 60_000, 120_000, 300_000];
-
 async function processRatelimitHeaders(headers: Headers, url: string) {
 	const remainingHeader = headers.get("ratelimit-remaining"),
 		resetHeader = headers.get("ratelimit-reset");
@@ -201,10 +169,7 @@ async function processRatelimitHeaders(headers: Headers, url: string) {
 			const now = Date.now();
 			const waitTime = ratelimitReset - now + 1000; // add a second to be safe
 			if (waitTime > 0) {
-				const cooldown = sleep(waitTime);
-				ratelimitCooldowns.set(url, cooldown);
-				await cooldown;
-				ratelimitCooldowns.delete(url);
+				await sleep(waitTime);
 			}
 		}
 	}
