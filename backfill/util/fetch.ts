@@ -11,22 +11,19 @@ export async function fetchPdses(): Promise<Array<string>> {
 	return pdses;
 }
 
-export async function fetchAllDids(onDid: (did: string, pds: string) => void) {
-	console.log("Fetching DIDs");
+export async function fetchAllDids(onDid: (did: string, pds: string) => void, beforeFetch?: () => Promise<void>) {
 	const pdses = await fetchPdses();
-	let count = 0;
-	await Promise.all(pdses.map((pds) => fetchPdsDids(pds, onDid).then((c) => (count += c))));
-	console.log(`Fetched ${count} DIDs`);
-	return count;
+	await Promise.all(pdses.map((pds) => fetchPdsDids(pds, onDid, beforeFetch)));
 }
 
-async function fetchPdsDids(pds: string, onDid: (did: string, pds: string) => void) {
+async function fetchPdsDids(pds: string, onDid: (did: string, pds: string) => void, beforeFetch?: () => Promise<void>) {
 	const url = new URL(`/xrpc/com.atproto.sync.listRepos`, pds).href;
 	let cursor = "";
 	let fetched = 0;
 	while (true) {
 		try {
-			const signal = AbortSignal.timeout(30_000);
+			await beforeFetch?.();
+			const signal = AbortSignal.timeout(10_000);
 			const res = await fetch(url + "?limit=1000&cursor=" + cursor, { signal });
 			if (!res.ok) {
 				if (res.status === 429) {
@@ -81,7 +78,7 @@ async function fetchPdsDids(pds: string, onDid: (did: string, pds: string) => vo
 			}
 		}
 	}
-	console.log(`Fetched ${fetched} DIDs from ${pds}`);
+	console.log(`Exhausted ${pds}: fetched ${fetched} DIDs, ended at cursor ${cursor}`);
 	return fetched;
 }
 

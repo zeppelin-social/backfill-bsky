@@ -10,15 +10,13 @@ import { createClient } from "@redis/client";
 import * as bsky from "@zeppelin-social/bsky-backfill";
 import Queue from "bee-queue";
 import CacheableLookup from "cacheable-lookup";
-import { DecoderStream } from "cbor-x";
 import cluster, { type Worker } from "node:cluster";
-import { createReadStream, existsSync } from "node:fs";
 import fs from "node:fs/promises";
 import * as os from "node:os";
 import path from "node:path";
 import PQueue from "p-queue";
 import { Agent, RetryAgent, setGlobalDispatcher } from "undici";
-import { sleep } from "./util/fetch.js";
+import { fetchAllDids, sleep } from "./util/fetch.js";
 import { openSearchWorker } from "./workers/opensearch.js";
 import { type CommitMessage, repoWorker } from "./workers/repo.js";
 import { writeCollectionWorker, writeWorkerAllocations } from "./workers/writeCollection.js";
@@ -361,22 +359,22 @@ if (cluster.isWorker) {
 
 	async function main() {
 		console.log("Reading DIDs");
-		const repos = readDids();
-
 		const seenDids = new Set(await redis.sMembers("backfill:seen"));
 		console.log(`Seen: ${seenDids.size} DIDs`);
 		totalProcessed = seenDids.size;
 
-		for await (const [did, pds] of repos) {
-			if (isShuttingDown) break;
-			// dumb pds doesn't implement getRepo
-			if (pds.includes("blueski.social")) continue;
-			if (seenDids.has(did)) continue;
-			await fetchQueue.onSizeLessThan(10_000);
-			void fetchQueue.add(() => queueRepo(pds, did)).catch((e) =>
-				console.error(`Error queuing repo for ${did} `, e)
-			);
-		}
+		await new Promise<void>(async (resolve) => {
+			await fetchAllDids(async (did, pds) => {
+				if (isShuttingDown) resolve();
+				// dumb pds doesn't implement getRepo
+				if (pds.includes("blueski.social")) return;
+				if (seenDids.has(did)) return;
+				await fetchQueue.onSizeLessThan(10_000);
+				void fetchQueue.add(() => queueRepo(pds, did)).catch((e) =>
+					console.error(`Error queuing repo for ${did} `, e)
+				);
+			}, () => fetchQueue.onSizeLessThan(100_000)); // only listRepos when we don't already have many queued
+		})
 	}
 
 	void main();
@@ -449,17 +447,6 @@ if (cluster.isWorker) {
 				}
 			}
 		});
-	}
-
-	function readDids() {
-		if (!existsSync("dids.cache")) {
-			console.error("dids.cache file not found. Please run the fetch-dids script first.");
-			process.exit(1);
-		}
-		const decoder = new DecoderStream();
-		const readStream = createReadStream("dids.cache");
-		readStream.pipe(decoder);
-		return decoder;
 	}
 
 	const backoffs = [1_000, 5_000, 15_000, 30_000, 60_000, 120_000, 300_000];
