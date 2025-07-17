@@ -14,7 +14,6 @@ export async function fetchPdses(): Promise<Array<string>> {
 }
 
 export async function* fetchAllDids() {
-	getPdsCursorCache();
 	const pdses = await fetchPdses();
 	yield* interleaveIterators(pdses.map(fetchPdsDids));
 }
@@ -22,7 +21,7 @@ export async function* fetchAllDids() {
 const listReposQueue = new PQueue({ concurrency: 25 });
 
 async function* fetchPdsDids(pds: string) {
-	let cursor = pdsCursorCache[pds] ?? "";
+	let cursor = getPdsCursorCache()?.[pds] ?? "";
 	if (cursor === "DONE") return console.warn(`Skipping exhaused PDS ${pds}`);
 	const url = new URL(`/xrpc/com.atproto.sync.listRepos`, pds).href;
 	let fetched = 0;
@@ -176,7 +175,7 @@ export async function getRepo(did: string, pds: string, attempt = 0): Promise<Ui
 // 	return map;
 // }
 
-let pdsCursorCache: Record<string, string> = {};
+let pdsCursorCache: Record<string, string>;
 const getPdsCursorCache =
 	() => (pdsCursorCache ??= JSON.parse(readFileSync("./pds-cursor-cache.json", "utf8")) as Record<
 		string,
@@ -216,18 +215,17 @@ export const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve
 async function* interleaveIterators<T>(asyncIterators: Array<AsyncIterator<T>>) {
 	const results = [];
 	let count = asyncIterators.length;
-	const never = new Promise<void>(() => {});
+	const never = new Promise<never>(() => {});
 	function getNext(
 		it: AsyncIterator<T>,
 		index: number,
-	): Promise<{ index: number; result: IteratorResult<T> } | void> {
+	) {
 		return it.next().then((result) => ({ index, result }));
 	}
 	const nextPromises = asyncIterators.map(getNext);
 	try {
 		while (count) {
-			const { index, result } = await Promise.race(nextPromises) ?? {};
-			if (!index || !result) continue;
+			const { index, result } = await Promise.race(nextPromises);
 			if (result.done) {
 				nextPromises[index] = never;
 				results[index] = result.value;
