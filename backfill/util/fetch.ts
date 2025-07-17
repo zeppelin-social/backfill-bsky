@@ -1,3 +1,4 @@
+import PQueue from "p-queue";
 import { errors, type Headers } from "undici";
 
 export async function fetchPdses(): Promise<Array<string>> {
@@ -11,31 +12,31 @@ export async function fetchPdses(): Promise<Array<string>> {
 	return pdses;
 }
 
-export async function fetchAllDids(
-	onDid: (did: string, pds: string) => void,
-) {
+export async function fetchAllDids(onDid: (did: string, pds: string) => void) {
 	const pdses = await fetchPdses();
 	await Promise.all(pdses.map((pds) => fetchPdsDids(pds, onDid)));
 }
 
-async function fetchPdsDids(
-	pds: string,
-	onDid: (did: string, pds: string) => void,
-) {
+const listReposQueue = new PQueue({ concurrency: 10 });
+
+async function fetchPdsDids(pds: string, onDid: (did: string, pds: string) => void) {
 	const url = new URL(`/xrpc/com.atproto.sync.listRepos`, pds).href;
 	let cursor = "";
 	let fetched = 0;
 	while (true) {
 		try {
-			const signal = AbortSignal.timeout(10_000);
-			const res = await fetch(url + "?limit=1000&cursor=" + cursor, { signal });
-			if (!res.ok) {
-				if (res.status === 429) {
+			const res = await listReposQueue.add(() =>
+				fetch(url + "?limit=1000&cursor=" + cursor, { signal: AbortSignal.timeout(10_000) })
+			);
+			if (!res?.ok) {
+				if (res?.status === 429) {
 					await processRatelimitHeaders(res.headers, url);
 					continue;
 				}
 				throw new Error(
-					`Failed to fetch DIDs from ${pds}: ${res.status} ${res.statusText}`,
+					`Failed to fetch DIDs from ${pds}: ${res?.status ?? "unknown"} ${
+						res?.statusText ?? ""
+					}`,
 				);
 			}
 
