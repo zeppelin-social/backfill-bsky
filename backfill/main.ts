@@ -444,7 +444,7 @@ if (cluster.isWorker) {
 	}
 
 	const failedMessages = new Set<WorkerMessage>();
-	async function forwardMessageToWorkers(worker: Worker, message: WorkerMessage) {
+	function forwardMessageToWorkers(worker: Worker, message: WorkerMessage) {
 		if (message.type === "shutdownComplete") {
 			if (!isShuttingDown) handleWorkerExit(worker, 0, "SIGINT");
 			if (!worker.process.killed) worker.kill();
@@ -482,6 +482,10 @@ if (cluster.isWorker) {
 		} catch (e) {
 			console.warn(`Failed to forward message to workers, retrying: ${e}`);
 			failedMessages.add(message);
+		}
+
+		for (const msg of failedMessages) {
+			forwardMessageToWorkers(worker, msg);
 		}
 	}
 

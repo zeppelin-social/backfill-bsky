@@ -1,3 +1,4 @@
+import { readFileSync, writeFileSync } from "node:fs";
 import PQueue from "p-queue";
 import { errors, type Headers } from "undici";
 
@@ -17,11 +18,12 @@ export async function fetchAllDids(onDid: (did: string, pds: string) => void) {
 	await Promise.all(pdses.map((pds) => fetchPdsDids(pds, onDid)));
 }
 
-const listReposQueue = new PQueue({ concurrency: 10 });
+const listReposQueue = new PQueue({ concurrency: 25 });
 
 async function fetchPdsDids(pds: string, onDid: (did: string, pds: string) => void) {
 	const url = new URL(`/xrpc/com.atproto.sync.listRepos`, pds).href;
-	let cursor = "";
+	let cursor = getPdsCursorCache()[pds] ?? "";
+	if (cursor === "DONE") return console.warn(`Skipping exhaused PDS ${pds}`)
 	let fetched = 0;
 	while (true) {
 		try {
@@ -51,7 +53,8 @@ async function fetchPdsDids(pds: string, onDid: (did: string, pds: string) => vo
 			}
 
 			if (!_c || _c === cursor) break;
-			cursor = _c;
+			pdsCursorCache[pds] = cursor = _c;
+			savePdsCursorCache();
 		} catch (err: any) {
 			const undiciError = err instanceof errors.UndiciError
 				? err
@@ -84,6 +87,8 @@ async function fetchPdsDids(pds: string, onDid: (did: string, pds: string) => vo
 		}
 	}
 	console.log(`Exhausted ${pds}: fetched ${fetched} DIDs, ended at cursor ${cursor}`);
+	pdsCursorCache[pds] = "DONE";
+	savePdsCursorCache();
 	return fetched;
 }
 
@@ -169,6 +174,15 @@ export async function getRepo(did: string, pds: string, attempt = 0): Promise<Ui
 // 	}
 // 	return map;
 // }
+
+let pdsCursorCache: Record<string, string> = {};
+const getPdsCursorCache =
+	() => (pdsCursorCache ??= JSON.parse(readFileSync("./pds-cursor-cache.json", "utf8")) as Record<
+		string,
+		string
+	>);
+const savePdsCursorCache = () =>
+	writeFileSync("./pds-cursor-cache.json", JSON.stringify(pdsCursorCache));
 
 const ratelimitCooldowns = new Map<string, Promise<unknown>>();
 const backoffs = [1_000, 5_000, 15_000, 30_000, 60_000, 120_000, 300_000];
