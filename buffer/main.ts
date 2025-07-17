@@ -48,7 +48,7 @@ class ToBufferSubscription extends FirehoseSubscription {
 			statsFrequencyMs: 0,
 		}, new URL("./dummyWorker.ts", import.meta.url));
 
-		// todo: fix `if (opts.cursor)` in @futur/bsky-indexer
+		// todo: remove once @futur/bsky-indexer 0.1.7 is published
 		if (opts.cursor !== undefined) this.cursor = `${opts.cursor}`;
 
 		this.stream = createWriteStream(filename, { flags: "a" });
