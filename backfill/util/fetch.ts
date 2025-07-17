@@ -13,17 +13,18 @@ export async function fetchPdses(): Promise<Array<string>> {
 	return pdses;
 }
 
-export async function fetchAllDids(onDid: (did: string, pds: string) => void) {
+export async function* fetchAllDids() {
+	getPdsCursorCache();
 	const pdses = await fetchPdses();
-	await Promise.all(pdses.map((pds) => fetchPdsDids(pds, onDid)));
+	yield* interleaveIterators(pdses.map(fetchPdsDids));
 }
 
 const listReposQueue = new PQueue({ concurrency: 25 });
 
-async function fetchPdsDids(pds: string, onDid: (did: string, pds: string) => void) {
+async function* fetchPdsDids(pds: string) {
+	let cursor = pdsCursorCache[pds] ?? "";
+	if (cursor === "DONE") return console.warn(`Skipping exhaused PDS ${pds}`);
 	const url = new URL(`/xrpc/com.atproto.sync.listRepos`, pds).href;
-	let cursor = getPdsCursorCache()[pds] ?? "";
-	if (cursor === "DONE") return console.warn(`Skipping exhaused PDS ${pds}`)
 	let fetched = 0;
 	while (true) {
 		try {
@@ -48,7 +49,7 @@ async function fetchPdsDids(pds: string, onDid: (did: string, pds: string) => vo
 			};
 			for (const repo of repos) {
 				if (!repo.did) continue;
-				onDid(repo.did, pds);
+				yield [repo.did, pds] as const;
 				fetched++;
 			}
 
@@ -210,3 +211,39 @@ async function processRatelimitHeaders(headers: Headers, url: string) {
 }
 
 export const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// https://stackoverflow.com/a/50586391
+async function* interleaveIterators<T>(asyncIterators: Array<AsyncIterator<T>>) {
+	const results = [];
+	let count = asyncIterators.length;
+	const never = new Promise<void>(() => {});
+	function getNext(
+		it: AsyncIterator<T>,
+		index: number,
+	): Promise<{ index: number; result: IteratorResult<T> } | void> {
+		return it.next().then((result) => ({ index, result }));
+	}
+	const nextPromises = asyncIterators.map(getNext);
+	try {
+		while (count) {
+			const { index, result } = await Promise.race(nextPromises) ?? {};
+			if (!index || !result) continue;
+			if (result.done) {
+				nextPromises[index] = never;
+				results[index] = result.value;
+				count--;
+			} else {
+				nextPromises[index] = getNext(asyncIterators[index], index);
+				yield result.value;
+			}
+		}
+	} finally {
+		for (const [index, iterator] of asyncIterators.entries()) {
+			if (nextPromises[index] != never && iterator.return != null) {
+				iterator.return();
+			}
+		}
+		// no await here - see https://github.com/tc39/proposal-async-iteration/issues/126
+	}
+	return results;
+}

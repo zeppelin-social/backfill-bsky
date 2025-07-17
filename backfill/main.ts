@@ -330,18 +330,16 @@ if (cluster.isWorker) {
 		console.log(`Seen: ${seenDids.size} DIDs`);
 		totalProcessed = seenDids.size;
 
-		await new Promise<void>(async (resolve) => {
-			await fetchAllDids(async (did, pds) => {
-				if (isShuttingDown) resolve();
-				// dumb pds doesn't implement getRepo
-				if (pds.includes("blueski.social")) return;
-				if (seenDids.has(did)) return;
-				await fetchQueue.onSizeLessThan(10_000);
-				void fetchQueue.add(() => queueRepo(pds, did)).catch((e) =>
-					console.error(`Error queuing repo for ${did} `, e)
-				);
-			});
-		});
+		for await (const [did, pds] of fetchAllDids()) {
+			if (isShuttingDown) break;
+			// dumb pds doesn't implement getRepo
+			if (pds.includes("blueski.social")) continue;
+			if (seenDids.has(did)) continue;
+			await fetchQueue.onSizeLessThan(10_000);
+			void fetchQueue.add(() => queueRepo(pds, did)).catch((e) =>
+				console.error(`Error queuing repo for ${did} `, e)
+			);
+		}
 	}
 
 	void main();
