@@ -24,7 +24,7 @@ for (const envVar of ["BUFFER_REPO_PROVIDER"]) {
 
 let initialCursor: number | undefined = 0;
 if (process.argv.join(" ").includes("--cursor")) {
-	const cursor = process.argv[process.argv.indexOf("--cursor")];
+	const cursor = process.argv[process.argv.indexOf("--cursor") + 1];
 	initialCursor = cursor === "latest" ? undefined : parseInt(cursor);
 } else if (existsSync("relay-buffer.jsonl")) {
 	try {
