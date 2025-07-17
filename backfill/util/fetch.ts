@@ -11,12 +11,19 @@ export async function fetchPdses(): Promise<Array<string>> {
 	return pdses;
 }
 
-export async function fetchAllDids(onDid: (did: string, pds: string) => void, beforeFetch?: () => Promise<void>) {
+export async function fetchAllDids(
+	onDid: (did: string, pds: string) => void,
+	beforeFetch?: () => Promise<void>,
+) {
 	const pdses = await fetchPdses();
 	await Promise.all(pdses.map((pds) => fetchPdsDids(pds, onDid, beforeFetch)));
 }
 
-async function fetchPdsDids(pds: string, onDid: (did: string, pds: string) => void, beforeFetch?: () => Promise<void>) {
+async function fetchPdsDids(
+	pds: string,
+	onDid: (did: string, pds: string) => void,
+	beforeFetch?: () => Promise<void>,
+) {
 	const url = new URL(`/xrpc/com.atproto.sync.listRepos`, pds).href;
 	let cursor = "";
 	let fetched = 0;
