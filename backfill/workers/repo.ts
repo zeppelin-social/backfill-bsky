@@ -192,6 +192,8 @@ export async function repoWorker() {
 
 	setInterval(() => {
 		process.send?.({ type: "count", fetched, parsed } satisfies FromWorkerMessage);
+		fetched = 0;
+		parsed = 0;
 	});
 
 	setTimeout(function forceGC() {
