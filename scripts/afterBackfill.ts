@@ -1,5 +1,9 @@
+import { isCanonicalResourceUri, isCid } from "@atcute/lexicons/syntax";
+import { IdResolver, MemoryCache } from "@atproto/identity";
 import { jsonStringToLex } from "@atproto/lexicon";
-import { Database } from "@zeppelin-social/bsky-backfill";
+import { WriteOpAction } from "@atproto/repo";
+import { AtUri } from "@atproto/syntax";
+import { BackgroundQueue, Database } from "@zeppelin-social/bsky-backfill";
 import type {
 	DatabaseSchema,
 	DatabaseSchemaType,
@@ -18,8 +22,11 @@ import type { Record as GateRecord } from "@zeppelin-social/bsky-backfill/dist/l
 import { postUriToThreadgateUri, uriToDid } from "@zeppelin-social/bsky-backfill/dist/util/uris";
 import { parsePostgate } from "@zeppelin-social/bsky-backfill/dist/views/util";
 import { sql } from "kysely";
+import { CID } from "multiformats/cid";
 import fs from "node:fs";
 import path from "node:path";
+import { IndexingService } from "../backfill/indexingService";
+import { jsonToLex, writeWorkerAllocations } from "../backfill/workers/writeCollection";
 
 declare global {
 	namespace NodeJS {
@@ -42,7 +49,7 @@ let state: State = {
 	validation: { cursor: null, index: 0 },
 };
 
-const POOL_SIZE = 10;
+const POOL_SIZE = 100;
 
 // const DB_SETTINGS = {
 // 	max_parallel_workers: 24,
@@ -64,6 +71,8 @@ async function main() {
 	addExitHandlers(db);
 
 	console.log("beginning backfill...");
+
+	await reindexFailedRecords(db);
 
 	await retryInParallel(
 		["post", backfillPostAggregates(db, state)],
@@ -459,6 +468,47 @@ async function validateReply(db: DatabaseSchema, creator: string, reply: ReplyRe
 		replyRefs.gate?.record ?? null,
 	);
 	return { invalidReplyRoot: invalidRoot, violatesThreadGate: violatesGate };
+}
+
+async function reindexFailedRecords(db: Database) {
+	const idResolver = new IdResolver({
+		plcUrl: process.env.BSKY_DID_PLC_URL,
+		didCache: new MemoryCache(),
+	});
+	const indexingSvc = new IndexingService(db, idResolver, new BackgroundQueue(db));
+
+	const collections = writeWorkerAllocations.flat();
+
+	await Promise.all(collections.map(async (collection) => {
+		const messages = fs.readFileSync(`./failed-${collection}.jsonl`, "utf8").split("\n").map((
+			m,
+		) => JSON.parse(m) as {
+			uri: string;
+			cid: string;
+			timestamp: string;
+			obj: Record<string, unknown>;
+		});
+
+		for (const msg of messages) {
+			try {
+				if (
+					!isCanonicalResourceUri(msg.uri) || !isCid(msg.cid)
+					|| isNaN(new Date(msg.timestamp).getTime())
+				) continue;
+				await indexingSvc.indexRecord(
+					new AtUri(msg.uri),
+					CID.parse(msg.cid),
+					jsonToLex(msg.obj),
+					WriteOpAction.Create,
+					msg.timestamp,
+					{ disableNotifs: true },
+				);
+			} catch (e) {
+				console.warn(`Skipping record ${msg.uri}, ${e}`);
+			}
+		}
+		console.log(`Done reindexing failed records for ${collection}`)
+	}));
 }
 
 async function validatePostEmbedsBulk(

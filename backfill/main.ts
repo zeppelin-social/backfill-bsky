@@ -288,7 +288,10 @@ if (cluster.isWorker) {
 		}
 
 		if (failedMessages?.size) {
-			await fs.writeFile("./failed-worker-messages.jsonl", JSON.stringify([...failedMessages.keys()]))
+			await fs.writeFile(
+				"./failed-worker-messages.jsonl",
+				JSON.stringify([...failedMessages.keys()]),
+			);
 		}
 
 		// Wait for all workers to report completion or timeout
