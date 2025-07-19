@@ -507,7 +507,7 @@ async function reindexFailedRecords(db: Database) {
 				console.warn(`Skipping record ${msg.uri}, ${e}`);
 			}
 		}
-		console.log(`Done reindexing failed records for ${collection}`)
+		console.log(`Done reindexing failed records for ${collection}`);
 	}));
 }
 

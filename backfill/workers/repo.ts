@@ -80,9 +80,12 @@ export async function repoWorker() {
 		try {
 			const now = Date.now();
 			for await (const { record, rkey, collection, cid } of iterateAtpRepo(repo)) {
-				if (!is(collection, record)) continue; // This allows us to set { validate: false } in the collection worker
-
 				const path = `${collection}/${rkey}`;
+
+				if (!is(collection, record)) { // This allows us to set { validate: false } in the collection worker
+					console.warn(`skipping at://${did}/${path}`);
+					continue;
+				}
 
 				// This should be the date the AppView saw the record, but since we don't want the "archived post" label
 				// to show for every post in social-app, we'll try our best to figure out when the record was actually created.
