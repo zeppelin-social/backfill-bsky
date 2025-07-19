@@ -2,7 +2,6 @@ import { createClient } from "@redis/client";
 import * as bsky from "@zeppelin-social/bsky-backfill";
 import Queue from "bee-queue";
 import CacheableLookup from "cacheable-lookup";
-import LargeSet from "large-set";
 import { LRUCache } from "lru-cache";
 import cluster, { type Worker } from "node:cluster";
 import fs from "node:fs/promises";
@@ -397,6 +396,7 @@ if (cluster.isWorker) {
 
 	function handleWorkerExit({ process: { pid } }: Worker, code: number, signal: string) {
 		console.warn(`Worker ${pid} exited with code ${code} and signal ${signal}`);
+		if (isShuttingDown) return;
 		if (!pid) return;
 		if (pid in workers.writeCollection) {
 			spawnWriteCollectionWorker(workers.writeCollection[pid].index);
