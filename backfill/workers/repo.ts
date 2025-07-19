@@ -19,7 +19,7 @@ export type CommitData = {
 	obj: unknown;
 };
 
-export type CommitMessage = { type: "commit"; collection: string; commits: CommitData[] };
+export type CommitMessage = { type: "commit"; did?: string; collection: string; commits: CommitData[] };
 
 export async function repoWorker() {
 	for (const envVar of ["REPOS_DIR"]) {
@@ -53,8 +53,6 @@ export async function repoWorker() {
 
 	let isShuttingDown = false;
 
-	let commitData: Record<string, CommitData[]> = {};
-
 	const indexActorQueue = new PQueue({ concurrency: 2 });
 	const toIndexDids = new Set<string>();
 	let actorsIndexed = 0;
@@ -80,9 +78,10 @@ export async function repoWorker() {
 			return;
 		}
 
+		const commitData: Record<string, CommitData[]> = {};
+
 		try {
 			const now = Date.now();
-			let i = 0;
 			const reader = RepoReader.fromUint8Array(repo);
 			for await (const { record, rkey, collection, cid } of reader) {
 				const path = `${collection}/${rkey}`;
@@ -116,10 +115,15 @@ export async function repoWorker() {
 				};
 
 				(commitData[collection] ??= []).push(data);
-				i++;
 			}
+
 			await redis.sAdd("backfill:seen", did);
 			toIndexDids.add(did);
+
+			const entries = Object.entries(commitData);
+			for (const [collection, commits] of entries) {
+				process.send!({ type: "commit", did, collection, commits } satisfies FromWorkerMessage);
+			}
 		} catch (err) {
 			console.warn(`iterateAtpRepo error for did ${did} --- ${err}`);
 			if (`${err}`.includes("invalid simple value")) {
@@ -163,14 +167,14 @@ export async function repoWorker() {
 		}
 	}
 
-	setTimeout(function sendCommits() {
-		const entries = Object.entries(commitData);
-		commitData = {};
-		for (const [collection, commits] of entries) {
-			process.send!({ type: "commit", collection, commits } satisfies FromWorkerMessage);
-		}
-		setTimeout(sendCommits, 200);
-	}, 200);
+	// setTimeout(function sendCommits() {
+		// const entries = Object.entries(commitData);
+		// commitData = {};
+		// for (const [collection, commits] of entries) {
+		// 	process.send!({ type: "commit", collection, commits } satisfies FromWorkerMessage);
+		// }
+		// setTimeout(sendCommits, 200);
+	// }, 200);
 
 	setTimeout(processActorQueue, 10_000);
 
