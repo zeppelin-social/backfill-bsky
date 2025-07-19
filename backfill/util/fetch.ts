@@ -181,41 +181,47 @@ export async function* roundRobinInterleaveIterators<T>(
 	iterators: Array<AsyncIterator<T>>,
 	concurrency = 25,
 ) {
-	const getNext = (it: AsyncIterator<T>, idx: number) => it.next().then((res) => ({ idx, res }));
+	const getNext = (it: AsyncIterator<T>, idx: number) =>
+		it.next().then((res) => ({ idx, res, error: null })).catch((error) => ({
+			idx,
+			res: null,
+			error,
+		}));
 
 	// Queue of iterator indices waiting for their next turn
 	const pending: number[] = iterators.map((_, i) => i);
 
-	// Currently running promises and their associated iterator indices
-	const activePromises: Array<Promise<{ idx: number; res: IteratorResult<T> }>> = [];
-	const activeIdxs: number[] = [];
+	// Active promises by iterator index
+	const activeMap = new Map<number, Promise<any>>();
 
 	const launch = () => {
-		while (activePromises.length < concurrency && pending.length) {
+		while (activeMap.size < concurrency && pending.length) {
 			const idx = pending.shift()!;
-			activeIdxs.push(idx);
-			activePromises.push(getNext(iterators[idx], idx));
+			const promise = getNext(iterators[idx], idx);
+			activeMap.set(idx, promise);
 		}
 	};
 
 	launch();
 
-	let notDoneIteratorCount = iterators.length;
+	const doneIterators = new Set<number>();
 
-	while (notDoneIteratorCount > 0) {
-		const { idx, res } = await Promise.race(activePromises);
+	while (doneIterators.size < iterators.length) {
+		if (activeMap.size === 0) break;
 
-		// Remove the settled promise from the active pools
-		const pos = activeIdxs.indexOf(idx);
-		activeIdxs.splice(pos, 1);
-		activePromises.splice(pos, 1);
+		const result = await Promise.race(activeMap.values());
+		activeMap.delete(result.idx);
 
-		if (res.done) {
-			notDoneIteratorCount--;
+		if (result.error) {
+			console.error(result.error);
+		}
+
+		if (result.res.done) {
+			doneIterators.add(result.idx);
 		} else {
-			// Emit value and put this iterator at the back of the line
-			yield res.value;
-			pending.push(idx);
+			// Emit value and put this iterator back in queue
+			yield result.res.value;
+			pending.push(result.idx);
 		}
 
 		// Top up the active promises pool to ensure we're operating at concurrency limit

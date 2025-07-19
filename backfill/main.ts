@@ -393,7 +393,12 @@ if (cluster.isWorker) {
 	async function queueRepo(pds: string, did: string) {
 		let pdsQueue = pdsQueues.get(pds);
 		if (!pdsQueue) {
-			pdsQueue = new PQueue({ concurrency: 25 });
+			let concurrency = 10;
+			try {
+				const url = new URL(pds);
+				if (url.hostname.endsWith("bsky.network")) concurrency = 25;
+			} catch { }
+			pdsQueue = new PQueue({ concurrency });
 			pdsQueues.set(pds, pdsQueue);
 		}
 
