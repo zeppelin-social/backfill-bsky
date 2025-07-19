@@ -317,18 +317,13 @@ if (cluster.isWorker) {
 	}, 5_000);
 
 	async function main() {
-		console.log("Reading DIDs");
-		const seenDids = new LargeSet(9_999_999);
-		for (const did of await redis.sMembers("backfill:seen")) {
-			seenDids.add(did);
-		}
-		console.log(`Seen: ${seenDids.size} DIDs`);
+		console.log(`Seen: ${await redis.sCard("backfill:seen")} DIDs`);
 
 		for await (const [did, pds] of fetchAllDids()) {
 			if (isShuttingDown) break;
 			// dumb pds doesn't implement getRepo
 			if (pds.includes("blueski.social")) continue;
-			if (seenDids.has(did)) continue;
+			if (await redis.sIsMember("backfill:seen", did)) continue;
 			await waitUntilQueueLessThan(queue, 5_000);
 			void queue.createJob({ did, pds }).setId(did).save().catch((e) =>
 				console.error(`Error queuing repo for ${did} `, e)
