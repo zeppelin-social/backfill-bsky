@@ -3,9 +3,10 @@ import { lexToJson } from "@atproto/lexicon";
 import { AtUri } from "@atproto/syntax";
 import { BackgroundQueue, Database } from "@zeppelin-social/bsky-backfill";
 import { CID } from "multiformats/cid";
-import { IdResolver, IndexingService } from "../indexingService.js";
-import type { CommitMessage } from "./repo.js";
-import type { ToInsertCommit } from "./writeCollection.js";
+import { IdResolver, IndexingService } from "../indexingService";
+import type { CommitMessage } from "./repo";
+import type { ToInsertCommit } from "./writeCollection";
+import type { FromWorkerMessage } from "../main";
 
 export async function writeRecordWorker() {
 	console.info(`Starting write record worker`);
@@ -47,6 +48,8 @@ export async function writeRecordWorker() {
 		if (msg.type !== "commit") {
 			throw new Error(`Invalid message type ${msg}`);
 		}
+
+		console.log(`record: received ${msg.commits.length} commits`);
 
 		for (const commit of msg.commits) {
 			const { did, path, cid: _cid, timestamp, obj: obj } = commit;
@@ -111,7 +114,7 @@ export async function writeRecordWorker() {
 		console.log("Write record worker received shutdown signal");
 		isShuttingDown = true;
 		await processRecordQueue();
-		process.send?.({ type: "shutdownComplete" });
+		process.send?.({ type: "shutdownComplete" } satisfies FromWorkerMessage);
 		process.exit(0);
 	}
 }

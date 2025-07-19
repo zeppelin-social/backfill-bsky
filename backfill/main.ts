@@ -23,7 +23,7 @@ import { type CommitMessage, repoWorker } from "./workers/repo.js";
 import { writeCollectionWorker, writeWorkerAllocations } from "./workers/writeCollection.js";
 import { writeRecordWorker } from "./workers/writeRecord.js";
 
-type WorkerMessage = CommitMessage | { type: "shutdownComplete" };
+export type FromWorkerMessage = CommitMessage | { type: "shutdownComplete" };
 
 declare global {
 	namespace NodeJS {
@@ -229,7 +229,7 @@ if (cluster.isWorker) {
 
 	cluster.on("exit", handleWorkerExit);
 
-	cluster.on("message", handleWorkerMessage);
+	cluster.on("message", handleFromWorkerMessage);
 
 	process.on("beforeExit", async () => {
 		console.log("Resetting DB settings");
@@ -461,7 +461,7 @@ if (cluster.isWorker) {
 	}
 
 	const failedMessages = new LRUCache<CommitMessage, true>({ max: 100_000 });
-	function handleWorkerMessage(worker: Worker, message: WorkerMessage) {
+	function handleFromWorkerMessage(worker: Worker, message: FromWorkerMessage) {
 		if (message.type === "shutdownComplete") {
 			if (!isShuttingDown) handleWorkerExit(worker, 0, "SIGINT");
 			if (!worker.process.killed) worker.kill();
@@ -472,10 +472,10 @@ if (cluster.isWorker) {
 			throw new Error(`Received invalid worker message: ${JSON.stringify(message)}`);
 		}
 
-		forwardCommitToWorkers(message);
+		forwardCommitsToWorkers(message);
 	}
 
-	function forwardCommitToWorkers(message: CommitMessage) {
+	function forwardCommitsToWorkers(message: CommitMessage) {
 		if (!message.commits.length) return;
 
 		const writeCollectionWorkerId = collectionToWriteWorkerId.get(message.collection);
@@ -512,7 +512,7 @@ if (cluster.isWorker) {
 		failedMessages.clear();
 
 		for (const msg of messages) {
-			forwardCommitToWorkers(msg);
+			forwardCommitsToWorkers(msg);
 		}
 	}, 5000);
 

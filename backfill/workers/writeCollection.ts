@@ -6,8 +6,9 @@ import { BlobRef, lexToJson } from "@atproto/lexicon";
 import { AtUri } from "@atproto/syntax";
 import { BackgroundQueue, Database } from "@zeppelin-social/bsky-backfill";
 import { CID } from "multiformats/cid";
-import { IdResolver, IndexingService } from "../indexingService.js";
-import type { CommitMessage } from "./repo.js";
+import { IdResolver, IndexingService } from "../indexingService";
+import type { CommitMessage } from "./repo";
+import type { FromWorkerMessage } from "../main";
 
 export type ToInsertCommit = { uri: AtUri; cid: CID; timestamp: string; obj: unknown };
 
@@ -90,6 +91,8 @@ export async function writeCollectionWorker() {
 			console.warn(`Received commit for unknown collection ${msg.collection}`);
 			return;
 		}
+
+		console.log(`${msg.collection}: received ${msg.commits.length} commits`);
 
 		for (const commit of msg.commits) {
 			const { did, path, cid: _cid, timestamp, obj: _obj } = commit;
@@ -174,7 +177,7 @@ export async function writeCollectionWorker() {
 		console.log(`Write collection worker ${workerIndex} received shutdown signal`);
 		isShuttingDown = true;
 		await processQueue();
-		process.send?.({ type: "shutdownComplete" });
+		process.send?.({ type: "shutdownComplete" } satisfies FromWorkerMessage);
 		process.exit(0);
 	}
 }

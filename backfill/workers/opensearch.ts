@@ -3,6 +3,7 @@ import { type Did, parseCanonicalResourceUri } from "@atcute/lexicons";
 import { Client as OpenSearchClient } from "@opensearch-project/opensearch";
 import normalizeUrl from "normalize-url";
 import type { CommitMessage } from "./repo";
+import type { FromWorkerMessage } from "../main";
 
 const POST_INDEX = "palomar_post";
 const PROFILE_INDEX = "palomar_profile";
@@ -130,7 +131,7 @@ export async function openSearchWorker() {
 		console.log(`OpenSearch worker received shutdown signal`);
 		isShuttingDown = true;
 		await processQueue();
-		process.send?.({ type: "shutdownComplete" });
+		process.send?.({ type: "shutdownComplete" } satisfies FromWorkerMessage);
 		process.exit(0);
 	}
 }

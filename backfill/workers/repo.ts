@@ -9,6 +9,7 @@ import path from "node:path";
 import PQueue from "p-queue";
 import { IdResolver, IndexingService } from "../indexingService";
 import { is } from "../util/lexicons";
+import type { FromWorkerMessage } from "../main";
 
 export type CommitData = {
 	did: string;
@@ -163,13 +164,10 @@ export async function repoWorker() {
 
 	setTimeout(function sendCommits() {
 		const entries = Object.entries(commitData);
-		let i = 0;
 		for (const [collection, commits] of entries) {
-			i += commits.length;
-			process.send!({ type: "commit", collection, commits } satisfies CommitMessage);
+			process.send!({ type: "commit", collection, commits } satisfies FromWorkerMessage);
 			commitData[collection].length = 0;
 		}
-		if (i > 0) console.log(`[${process.pid}] sent ${i} records`);
 		commitData = {};
 		setTimeout(sendCommits, 200);
 	}, 200);
@@ -190,6 +188,7 @@ export async function repoWorker() {
 	async function handleShutdown() {
 		isShuttingDown = true;
 		await processActorQueue();
+		process.send?.({ type: "shutdownComplete" } satisfies FromWorkerMessage);
 		process.exit(1);
 	}
 }
