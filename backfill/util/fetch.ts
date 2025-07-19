@@ -1,4 +1,5 @@
 import { readFileSync, writeFileSync } from "node:fs";
+import { setTimeout as sleep } from "node:timers/promises";
 import { errors, type Headers } from "undici";
 
 export async function fetchPdses(): Promise<Array<string>> {
@@ -171,8 +172,6 @@ async function processRatelimitHeaders(headers: Headers, url: string) {
 		}
 	}
 }
-
-export const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export async function* roundRobinInterleaveIterators<T>(
 	iterators: Array<AsyncIterator<T>>,

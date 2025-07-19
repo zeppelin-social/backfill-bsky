@@ -5,11 +5,11 @@ import { createClient } from "@redis/client";
 import { BackgroundQueue, Database } from "@zeppelin-social/bsky-backfill";
 import Queue from "bee-queue";
 import fs from "node:fs/promises";
-import path from "node:path";
 import PQueue from "p-queue";
 import { IdResolver, IndexingService } from "../indexingService.js";
 import type { FromWorkerMessage } from "../main.js";
 import { is } from "../util/lexicons.js";
+import { XRPCManager } from "../util/xrpc.js";
 
 export type CommitData = {
 	did: string;
@@ -22,16 +22,10 @@ export type CommitData = {
 export type CommitMessage = { type: "commit"; collection: string; commits: CommitData[] };
 
 export async function repoWorker() {
-	for (const envVar of ["REPOS_DIR"]) {
-		if (!process.env[envVar]) {
-			throw new Error(`Repo worker missing env var ${envVar}`);
-		}
-	}
-
 	const redis = createClient();
 	await redis.connect();
 
-	const queue = new Queue<{ did: string }>("repo-processing", {
+	const queue = new Queue<{ did: string; pds: string }>("repo-processing", {
 		removeOnSuccess: true,
 		removeOnFailure: true,
 		isWorker: true,
@@ -51,6 +45,8 @@ export async function repoWorker() {
 
 	const indexingSvc = new IndexingService(db, idResolver, new BackgroundQueue(db));
 
+	const xrpc = new XRPCManager();
+
 	let isShuttingDown = false;
 
 	let commitData: Record<string, CommitData[]> = {};
@@ -59,31 +55,40 @@ export async function repoWorker() {
 	const toIndexDids = new Set<string>();
 	let actorsIndexed = 0;
 
-	queue.process(10, async (job) => {
+	queue.process(20, async (job) => {
 		if (!process?.send) throw new Error("Not a worker process");
 
-		const { did } = job.data;
+		const { did, pds } = job.data;
 
-		if (!did || typeof did !== "string") {
+		if (!did || typeof did !== "string" || !pds || typeof pds !== "string") {
 			console.warn(`Invalid job data for ${job.id}: ${JSON.stringify(job.data)}`);
 			return;
 		}
 
-		let repo: Uint8Array | null;
-		try {
-			repo = await fs.readFile(path.join(process.env.REPOS_DIR!, did));
-			if (!repo?.byteLength) throw "Got empty repo";
-		} catch (err) {
-			if (!`${err}`.includes("ENOENT")) {
-				console.warn("Error while getting repo bytes for " + did, err);
+		const bytes = await xrpc.query(
+			pds,
+			async (client) =>
+				await client.get("com.atproto.sync.getRepo", {
+					params: { did: did as `did:plc:${string}` },
+					as: "stream",
+				}),
+		).catch(async (err) => {
+			if (
+				["RepoDeactivated", "RepoTakendown", "RepoNotFound", "NotFound"].some((s) =>
+					`${err}`.includes(s)
+				)
+			) {
+				await redis.sAdd("backfill:seen", did);
+			} else {
+				console.error(`Error fetching repo for ${did} --- ${err}`);
 			}
-			return;
-		}
+		});
+		if (!bytes) return;
 
 		try {
 			const now = Date.now();
-			const reader = RepoReader.fromUint8Array(repo);
-			for await (const { record, rkey, collection, cid } of reader) {
+			const repo = RepoReader.fromStream(bytes);
+			for await (const { record, rkey, collection, cid } of repo) {
 				const path = `${collection}/${rkey}`;
 
 				if (!is(collection, record)) { // This allows us to set { validate: false } in the collection worker
@@ -127,9 +132,6 @@ export async function repoWorker() {
 				console.warn(`Marking broken bridgy repo ${did} as seen`);
 				await redis.sAdd("backfill:seen", did);
 			}
-		} finally {
-			repo = null;
-			await fs.unlink(path.join(process.env.REPOS_DIR!, did));
 		}
 	});
 

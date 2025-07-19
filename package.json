@@ -18,6 +18,7 @@
 	"author": "",
 	"license": "MPL-2.0",
 	"devDependencies": {
+		"@atcute/atproto": "^3.1.1",
 		"@types/bun": "^1.1.14",
 		"@types/node": "^22.9.4",
 		"@types/pg": "^8.11.10",
@@ -28,7 +29,7 @@
 		"@atcute/bluesky": "^3.1.5",
 		"@atcute/car": "^3.1.1",
 		"@atcute/cbor": "^2.2.4",
-		"@atcute/client": "^2.0.7",
+		"@atcute/client": "^4.0.3",
 		"@atcute/lexicons": "^1.1.0",
 		"@atcute/tid": "^1.0.2",
 		"@atproto/identity": "^0.4.8",

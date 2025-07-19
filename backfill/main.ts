@@ -1,11 +1,3 @@
-import {
-	type HeadersObject,
-	simpleFetchHandler,
-	XRPC,
-	XRPCError,
-	type XRPCRequestOptions,
-	type XRPCResponse,
-} from "@atcute/client";
 import { createClient } from "@redis/client";
 import * as bsky from "@zeppelin-social/bsky-backfill";
 import Queue from "bee-queue";
@@ -13,11 +5,10 @@ import CacheableLookup from "cacheable-lookup";
 import { LRUCache } from "lru-cache";
 import cluster, { type Worker } from "node:cluster";
 import fs from "node:fs/promises";
+import { setTimeout as sleep } from "node:timers/promises";
 import * as os from "node:os";
-import path from "node:path";
-import PQueue from "p-queue";
 import { Agent, RetryAgent, setGlobalDispatcher } from "undici";
-import { fetchAllDids, sleep } from "./util/fetch.js";
+import { fetchAllDids } from "./util/fetch.js";
 import { openSearchWorker } from "./workers/opensearch.js";
 import { type CommitMessage, repoWorker } from "./workers/repo.js";
 import { writeCollectionWorker, writeWorkerAllocations } from "./workers/writeCollection.js";
@@ -124,14 +115,11 @@ if (cluster.isWorker) {
 	const redis = createClient();
 	await redis.connect();
 
-	const queue = new Queue<{ did: string }>("repo-processing", {
+	const queue = new Queue<{ did: string; pds: string }>("repo-processing", {
 		removeOnSuccess: true,
 		removeOnFailure: true,
 		isWorker: false,
 	});
-
-	const REPOS_DIR = path.join(os.tmpdir(), "backfill-bsky-repos");
-	await fs.mkdir(REPOS_DIR, { recursive: true });
 
 	const workers = {
 		repo: {},
@@ -195,13 +183,13 @@ if (cluster.isWorker) {
 
 	// Initialize repo workers
 	const spawnRepoWorker = () => {
-		const worker = cluster.fork({ WORKER_KIND: "repo", REPOS_DIR });
+		const worker = cluster.fork({ WORKER_KIND: "repo" });
 		if (!worker.process?.pid) throw new Error("Worker process not found");
 		workers.repo[worker.process.pid] = { kind: "repo" };
 		worker.on("error", (err) => {
 			console.error(`Repo worker error: ${err}`);
 			worker.kill();
-			cluster.fork({ WORKER_KIND: "repo", REPOS_DIR });
+			cluster.fork({ WORKER_KIND: "repo" });
 		});
 	};
 
@@ -253,15 +241,9 @@ if (cluster.isWorker) {
 		console.log(`Exiting with code ${code}`);
 	});
 
-	const fetchQueue = new PQueue({ concurrency: 1_000 });
-
 	process.on("SIGINT", async () => {
 		console.log("\nReceived SIGINT. Starting graceful shutdown...");
 		isShuttingDown = true;
-
-		// Stop accepting new repos
-		fetchQueue.pause();
-		pdsQueues.forEach((queue) => queue.pause());
 
 		// Track which workers have completed
 		const completedWorkers = new Set<number>();
@@ -330,8 +312,6 @@ if (cluster.isWorker) {
 			`Processed repos: ${processed.toFixed(1)}/s | Fetched repos: ${
 				fetched.toFixed(1)
 			}/s | Profiles seen: ${profilesSeen.toFixed(1)}/s`,
-			`\n`,
-			`Fetch queue: ${fetchQueue.size} DIDs | ${fetchQueue.pending} pending`,
 		);
 	}, 5_000);
 
@@ -345,120 +325,14 @@ if (cluster.isWorker) {
 			// dumb pds doesn't implement getRepo
 			if (pds.includes("blueski.social")) continue;
 			if (seenDids.has(did)) continue;
-			await fetchQueue.onSizeLessThan(10_000);
-			void (fetchQueue.add(() => queueRepo(pds, did)).catch((e) =>
+			await waitUntilQueueLessThan(queue, 5_000)
+			void queue.createJob({ did, pds }).setId(did).save().catch((e) =>
 				console.error(`Error queuing repo for ${did} `, e)
-			));
+			)
 		}
 	}
 
 	void main();
-
-	class WrappedRPC extends XRPC {
-		constructor(public service: string) {
-			super({ handler: simpleFetchHandler({ service }) });
-		}
-
-		override async request(options: XRPCRequestOptions, attempt = 0): Promise<XRPCResponse> {
-			const url = new URL("/xrpc/" + options.nsid, this.service).href;
-
-			const request = async () => {
-				const res = await super.request(options);
-				await processRatelimitHeaders(res.headers, url, sleep);
-				return res;
-			};
-
-			try {
-				return await request();
-			} catch (err) {
-				if (attempt > 6) throw err;
-
-				if (err instanceof XRPCError) {
-					if (err.status === 429) {
-						await processRatelimitHeaders(err.headers, url, sleep);
-					} else throw err;
-				} else if (err instanceof TypeError) {
-					console.warn(`fetch failed for ${url}, skipping`);
-					throw err;
-				} else {
-					await sleep(backoffs[attempt] || 60000);
-				}
-				console.warn(`Retrying request to ${url}, on attempt ${attempt}`);
-				return this.request(options, attempt + 1);
-			}
-		}
-	}
-
-	const pdsQueues = new Map<string, PQueue>();
-	const pdsRpcs = new Map<string, WrappedRPC>();
-
-	async function queueRepo(pds: string, did: string) {
-		let pdsQueue = pdsQueues.get(pds);
-		if (!pdsQueue) {
-			let concurrency = 10;
-			try {
-				const url = new URL(pds);
-				if (url.hostname.endsWith("bsky.network")) concurrency = 20;
-			} catch {}
-			pdsQueue = new PQueue({ concurrency });
-			pdsQueues.set(pds, pdsQueue);
-		}
-
-		await pdsQueue.add(async () => {
-			try {
-				let rpc = pdsRpcs.get(pds);
-				if (!rpc) {
-					rpc = new WrappedRPC(pds);
-					pdsRpcs.set(pds, rpc);
-				}
-				const { data: repo } = await rpc.get("com.atproto.sync.getRepo", {
-					params: { did: did as `did:${string}` },
-				});
-				if (repo?.length) {
-					await fs.writeFile(path.join(REPOS_DIR, did), repo, { flag: "w" });
-					await queue.createJob({ did }).setId(did).save();
-					fetchedOverInterval++;
-				}
-			} catch (err) {
-				if (
-					["RepoDeactivated", "RepoTakendown", "RepoNotFound", "NotFound"].some((s) =>
-						`${err}`.includes(s)
-					)
-				) {
-					await redis.sAdd("backfill:seen", did);
-				} else {
-					console.error(`Error fetching repo for ${did} --- ${err}`);
-				}
-			}
-		});
-	}
-
-	const backoffs = [1_000, 5_000, 15_000, 30_000, 60_000, 120_000, 300_000];
-
-	async function processRatelimitHeaders(
-		headers: HeadersObject,
-		url: string,
-		onRatelimit: (wait: number) => unknown,
-	) {
-		const remainingHeader = headers["ratelimit-remaining"],
-			resetHeader = headers["ratelimit-reset"];
-		if (!remainingHeader || !resetHeader) return;
-
-		const ratelimitRemaining = parseInt(remainingHeader);
-		if (isNaN(ratelimitRemaining) || ratelimitRemaining <= 1) {
-			const ratelimitReset = parseInt(resetHeader) * 1000;
-			if (isNaN(ratelimitReset)) {
-				console.error("ratelimit-reset header is not a number at url " + url);
-			} else {
-				const now = Date.now();
-				const waitTime = ratelimitReset - now + 1000; // add 1s to be safe
-				if (waitTime > 0) {
-					console.log("Rate limited at " + url + ", waiting " + waitTime + "ms");
-					await onRatelimit(waitTime);
-				}
-			}
-		}
-	}
 
 	const failedMessages = new LRUCache<CommitMessage, true>({ max: 100_000 });
 	function handleFromWorkerMessage(worker: Worker, message: FromWorkerMessage) {
@@ -543,5 +417,13 @@ if (cluster.isWorker) {
 		} else {
 			console.error(`Unknown worker kind: ${pid}`);
 		}
+	}
+
+	async function waitUntilQueueLessThan(queue: Queue, size: number) {
+		do {
+			const { waiting, active } = await queue.checkHealth();
+			if (waiting + active < size) return;
+			await sleep(500);
+		} while (true);
 	}
 }
