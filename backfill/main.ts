@@ -101,6 +101,10 @@ if (cluster.isWorker) {
 		throw new Error(`Unknown worker kind: ${process.env.WORKER_KIND}`);
 	}
 } else {
+	const args = process.argv.slice(2);
+	const indexOfInspect = args.findIndex((a) => a.startsWith("--inspect"));
+	cluster.setupPrimary({ args: indexOfInspect > -1 ? args.toSpliced(indexOfInspect, 1) : args });
+
 	const db = new bsky.Database({
 		url: process.env.BSKY_DB_POSTGRES_URL,
 		schema: process.env.BSKY_DB_POSTGRES_SCHEMA,
