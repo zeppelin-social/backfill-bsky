@@ -65,10 +65,10 @@ export class XRPCManager {
 
 		if ("headers" in error && error.headers) {
 			let reset;
-			if (error.headers instanceof Headers && error.headers.has("rate-limit-reset")) {
-				reset = parseInt(error.headers.get("rate-limit-reset")!);
-			} else if (typeof error.headers === "object" && "rate-limit-reset" in error.headers) {
-				reset = parseInt(`${error.headers["rate-limit-reset"]}`);
+			if (error.headers instanceof Headers && error.headers.has("ratelimit-reset")) {
+				reset = parseInt(error.headers.get("ratelimit-reset")!);
+			} else if (typeof error.headers === "object" && "ratelimit-reset" in error.headers) {
+				reset = parseInt(`${error.headers["ratelimit-reset"]}`);
 			}
 			if (reset) {
 				console.warn(`Rate limited, retrying in ${reset} seconds`, error);

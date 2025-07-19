@@ -5,8 +5,8 @@ import CacheableLookup from "cacheable-lookup";
 import { LRUCache } from "lru-cache";
 import cluster, { type Worker } from "node:cluster";
 import fs from "node:fs/promises";
-import { setTimeout as sleep } from "node:timers/promises";
 import * as os from "node:os";
+import { setTimeout as sleep } from "node:timers/promises";
 import { Agent, RetryAgent, setGlobalDispatcher } from "undici";
 import { fetchAllDids } from "./util/fetch.js";
 import { openSearchWorker } from "./workers/opensearch.js";
@@ -15,8 +15,9 @@ import { writeCollectionWorker, writeWorkerAllocations } from "./workers/writeCo
 import { writeRecordWorker } from "./workers/writeRecord.js";
 
 export type FromWorkerMessage = CommitMessage | { type: "shutdownComplete" } | {
-	type: "didCount";
-	count: number;
+	type: "count";
+	fetched: number;
+	parsed: number;
 };
 
 declare global {
@@ -298,20 +299,15 @@ if (cluster.isWorker) {
 		process.exit(0);
 	});
 
-	let didsOverInterval = 0, fetchedOverInterval = 0, profilesSeenOverInterval = 0;
+	let processedOverInterval = 0, fetchedOverInterval = 0;
 
 	setInterval(async () => {
-		const processed = didsOverInterval / 5,
-			fetched = fetchedOverInterval / 5,
-			profilesSeen = profilesSeenOverInterval / 5;
-		didsOverInterval = 0;
+		const processed = processedOverInterval / 5, fetched = fetchedOverInterval / 5;
+		processedOverInterval = 0;
 		fetchedOverInterval = 0;
-		profilesSeenOverInterval = 0;
 
 		console.log(
-			`Processed repos: ${processed.toFixed(1)}/s | Fetched repos: ${
-				fetched.toFixed(1)
-			}/s | Profiles seen: ${profilesSeen.toFixed(1)}/s`,
+			`Processed repos: ${processed.toFixed(1)}/s | Fetched repos: ${fetched.toFixed(1)}/s`,
 		);
 	}, 5_000);
 
@@ -325,10 +321,10 @@ if (cluster.isWorker) {
 			// dumb pds doesn't implement getRepo
 			if (pds.includes("blueski.social")) continue;
 			if (seenDids.has(did)) continue;
-			await waitUntilQueueLessThan(queue, 5_000)
+			await waitUntilQueueLessThan(queue, 5_000);
 			void queue.createJob({ did, pds }).setId(did).save().catch((e) =>
 				console.error(`Error queuing repo for ${did} `, e)
-			)
+			);
 		}
 	}
 
@@ -342,8 +338,9 @@ if (cluster.isWorker) {
 			return;
 		}
 
-		if (message.type === "didCount") {
-			didsOverInterval += message.count;
+		if (message.type === "count") {
+			fetchedOverInterval += message.fetched;
+			processedOverInterval += message.parsed;
 			return;
 		}
 
@@ -362,10 +359,6 @@ if (cluster.isWorker) {
 		if (writeCollectionWorkerId === undefined) {
 			console.warn(`Received commit for unknown collection ${message.collection}`);
 			return;
-		}
-
-		if (message.collection === "app.bsky.actor.profile") {
-			profilesSeenOverInterval += message.commits.length;
 		}
 
 		const writeCollectionWorker = cluster.workers?.[writeCollectionWorkerId];

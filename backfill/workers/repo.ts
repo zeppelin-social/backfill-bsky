@@ -53,9 +53,11 @@ export async function repoWorker() {
 
 	const indexActorQueue = new PQueue({ concurrency: 2 });
 	const toIndexDids = new Set<string>();
+
+	let fetched = 0, parsed = 0;
 	let actorsIndexed = 0;
 
-	queue.process(20, async (job) => {
+	queue.process(25, async (job) => {
 		if (!process?.send) throw new Error("Not a worker process");
 
 		const { did, pds } = job.data;
@@ -84,6 +86,8 @@ export async function repoWorker() {
 			}
 		});
 		if (!bytes) return;
+
+		fetched++;
 
 		try {
 			const now = Date.now();
@@ -124,8 +128,6 @@ export async function repoWorker() {
 
 			await redis.sAdd("backfill:seen", did);
 			toIndexDids.add(did);
-
-			process.send!({ type: "didCount", count: 1 } satisfies FromWorkerMessage);
 		} catch (err) {
 			console.warn(`iterateAtpRepo error for did ${did} --- ${err}`);
 			if (`${err}`.includes("invalid simple value")) {
@@ -133,6 +135,7 @@ export async function repoWorker() {
 				await redis.sAdd("backfill:seen", did);
 			}
 		}
+		parsed++;
 	});
 
 	queue.on("error", (err) => {
@@ -180,10 +183,16 @@ export async function repoWorker() {
 	setTimeout(processActorQueue, 10_000);
 
 	setTimeout(function logIndexedActors() {
-		console.log(`Indexed actors: ${actorsIndexed}`);
+		if (actorsIndexed > 0) {
+			console.log(`Indexed actors: ${actorsIndexed}`);
+		}
 		actorsIndexed = 0;
 		setTimeout(logIndexedActors, 60_000);
 	}, Math.random() * 60_000); // Spread out the logging a bit so there isn't a barrage of these
+
+	setInterval(() => {
+		process.send?.({ type: "count", fetched, parsed } satisfies FromWorkerMessage);
+	});
 
 	setTimeout(function forceGC() {
 		Bun.gc(true);
