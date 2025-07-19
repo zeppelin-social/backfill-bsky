@@ -425,7 +425,6 @@ if (cluster.isWorker) {
 					)
 				) {
 					await redis.sAdd("backfill:seen", did);
-					console.error(`Marking ${did} as seen --- ${err}`);
 				} else {
 					console.error(`Error fetching repo for ${did} --- ${err}`);
 				}

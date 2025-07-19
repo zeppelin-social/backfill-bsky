@@ -92,8 +92,6 @@ export async function writeCollectionWorker() {
 			return;
 		}
 
-		console.log(`${msg.collection}: received ${msg.commits.length} commits`);
-
 		for (const commit of msg.commits) {
 			const { did, path, cid: _cid, timestamp, obj: _obj } = commit;
 			if (!did || !path || !_cid || !timestamp || !_obj) {

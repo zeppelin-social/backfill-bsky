@@ -49,8 +49,6 @@ export async function writeRecordWorker() {
 			throw new Error(`Invalid message type ${msg}`);
 		}
 
-		console.log(`record: received ${msg.commits.length} commits`);
-
 		for (const commit of msg.commits) {
 			const { did, path, cid: _cid, timestamp, obj: obj } = commit;
 			if (!did || !path || !_cid || !timestamp || !obj) {
