@@ -318,7 +318,7 @@ if (cluster.isWorker) {
 
 	async function main() {
 		console.log("Reading DIDs");
-		const seenDids = new LargeSet();
+		const seenDids = new LargeSet(9_999_999);
 		for (const did of await redis.sMembers("backfill:seen")) {
 			seenDids.add(did);
 		}
