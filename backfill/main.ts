@@ -201,7 +201,7 @@ if (cluster.isWorker) {
 	};
 
 	const numCPUs = os.availableParallelism();
-	const repoWorkerCount = Math.max(16, Math.min(numCPUs * 2, 32));
+	const repoWorkerCount = Math.max(16, Math.min(numCPUs * 2, 64));
 	for (let i = 3; i < repoWorkerCount; i++) {
 		spawnRepoWorker();
 	}
