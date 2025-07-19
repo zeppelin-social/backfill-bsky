@@ -116,7 +116,6 @@ export async function repoWorker() {
 				(commitData[collection] ??= []).push(data);
 				i++;
 			}
-			console.log(`[${process.pid}] parsed ${i} records`);
 			await redis.sAdd("backfill:seen", did);
 			toIndexDids.add(did);
 		} catch (err) {
