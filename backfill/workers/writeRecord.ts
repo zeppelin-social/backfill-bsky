@@ -4,9 +4,9 @@ import { AtUri } from "@atproto/syntax";
 import { BackgroundQueue, Database } from "@zeppelin-social/bsky-backfill";
 import { CID } from "multiformats/cid";
 import { IdResolver, IndexingService } from "../indexingService";
+import type { FromWorkerMessage } from "../main";
 import type { CommitMessage } from "./repo";
 import type { ToInsertCommit } from "./writeCollection";
-import type { FromWorkerMessage } from "../main";
 
 export async function writeRecordWorker() {
 	console.info(`Starting write record worker`);

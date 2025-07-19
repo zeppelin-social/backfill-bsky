@@ -324,7 +324,9 @@ if (cluster.isWorker) {
 		profilesSeenOverInterval = 0;
 
 		console.log(
-			`Processed repos: ${processed.toFixed(1)}/s | Fetched repos: ${fetched.toFixed(1)}/s | Profiles seen: ${profilesSeen.toFixed(1)}/s`,
+			`Processed repos: ${processed.toFixed(1)}/s | Fetched repos: ${
+				fetched.toFixed(1)
+			}/s | Profiles seen: ${profilesSeen.toFixed(1)}/s`,
 			`\n`,
 			`Fetch queue: ${fetchQueue.size} DIDs | ${fetchQueue.pending} pending`,
 		);
