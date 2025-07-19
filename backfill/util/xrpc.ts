@@ -60,10 +60,10 @@ export class XRPCManager {
 		}
 
 		if (error instanceof DOMException && error.name === "TimeoutError") return true;
-
 		if (error instanceof TypeError) return false;
 
-		if ("headers" in error && error.headers) {
+		// Error must have headers and, if it does have a status, the status must be 429
+		if ("headers" in error && error.headers && (!("status" in error) || error.status === 429)) {
 			let reset;
 			if (error.headers instanceof Headers && error.headers.has("ratelimit-reset")) {
 				reset = parseInt(error.headers.get("ratelimit-reset")!);
