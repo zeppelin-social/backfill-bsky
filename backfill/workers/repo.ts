@@ -1,9 +1,13 @@
 import { iterateAtpRepo } from "@atcute/car";
 import { parse as parseTID } from "@atcute/tid";
+import { MemoryCache } from "@atproto/identity";
 import { createClient } from "@redis/client";
+import { BackgroundQueue, Database } from "@zeppelin-social/bsky-backfill";
 import Queue from "bee-queue";
 import fs from "node:fs/promises";
 import path from "node:path";
+import PQueue from "p-queue";
+import { IdResolver, IndexingService } from "../indexingService";
 import { is } from "../util/lexicons";
 
 export type CommitData = {
@@ -31,7 +35,27 @@ export async function repoWorker() {
 		removeOnFailure: true,
 	});
 
+	const db = new Database({
+		url: process.env.BSKY_DB_POSTGRES_URL,
+		schema: process.env.BSKY_DB_POSTGRES_SCHEMA,
+		poolSize: 20,
+		poolIdleTimeoutMs: 60_000,
+	});
+
+	const idResolver = new IdResolver({
+		plcUrl: process.env.BSKY_DID_PLC_URL,
+		fallbackPlc: process.env.FALLBACK_PLC_URL,
+		didCache: new MemoryCache(),
+	});
+
+	const indexingSvc = new IndexingService(db, idResolver, new BackgroundQueue(db));
+
+	let isShuttingDown = false;
+
 	let commitData: Record<string, CommitData[]> = {};
+
+	const indexActorQueue = new PQueue({ concurrency: 2 });
+	const toIndexDids = new Set<string>();
 
 	queue.process(25, async (job) => {
 		if (!process?.send) throw new Error("Not a worker process");
@@ -87,6 +111,7 @@ export async function repoWorker() {
 				(commitData[collection] ??= []).push(data);
 			}
 			await redis.sAdd("backfill:seen", did);
+			toIndexDids.add(did);
 		} catch (err) {
 			console.warn(`iterateAtpRepo error for did ${did} --- ${err}`);
 			if (`${err}`.includes("invalid simple value")) {
@@ -102,13 +127,38 @@ export async function repoWorker() {
 
 	queue.on("error", (err) => {
 		console.error("Queue error:", err);
-		process.exit(1);
+		handleShutdown();
 	});
 
 	queue.on("failed", (job, err) => {
 		console.error(`Job failed for ${job.data.did}:`, err);
-		process.exit(1);
+		handleShutdown();
 	});
+
+	process.on("SIGTERM", handleShutdown);
+	process.on("SIGINT", handleShutdown);
+
+	async function processActorQueue() {
+		if (!isShuttingDown) {
+			setTimeout(processActorQueue, 2000);
+		}
+
+		if (toIndexDids.size > 0) {
+			const dids = [...toIndexDids];
+			toIndexDids.clear();
+			void indexActorQueue.add(async () => {
+				try {
+					const time = `Indexing actors: ${dids.length}`;
+					console.time(time);
+					await indexingSvc.indexActorsBulk(dids);
+					console.timeEnd(time);
+				} catch (e) {
+					console.error(`Error while indexing actors: ${e}`);
+					await Bun.write(`./failed-actors.jsonl`, dids.join(",") + "\n");
+				}
+			});
+		}
+	}
 
 	setTimeout(function sendCommits() {
 		const entries = Object.entries(commitData);
@@ -120,8 +170,16 @@ export async function repoWorker() {
 		setTimeout(sendCommits, 200);
 	}, 200);
 
+	setTimeout(processActorQueue, 2000);
+
 	setTimeout(function forceGC() {
 		Bun.gc(true);
 		setTimeout(forceGC, 30_000);
 	}, 30_000);
+
+	async function handleShutdown() {
+		isShuttingDown = true;
+		await processActorQueue();
+		process.exit(1);
+	}
 }

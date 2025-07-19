@@ -2,9 +2,7 @@ import { MemoryCache } from "@atproto/identity";
 import { lexToJson } from "@atproto/lexicon";
 import { AtUri } from "@atproto/syntax";
 import { BackgroundQueue, Database } from "@zeppelin-social/bsky-backfill";
-import { LRUCache } from "lru-cache";
 import { CID } from "multiformats/cid";
-import PQueue from "p-queue";
 import { IdResolver, IndexingService } from "../indexingService.js";
 import type { CommitMessage } from "./repo.js";
 import type { ToInsertCommit } from "./writeCollection.js";
@@ -30,16 +28,11 @@ export async function writeRecordWorker() {
 	let toIndexRecords: ToInsertCommit[] = [];
 
 	let recordQueueTimer = setTimeout(processRecordQueue, 500);
-	setTimeout(processActorQueue, 2000);
 
 	setTimeout(function forceGC() {
 		Bun.gc(true);
 		setTimeout(forceGC, 30_000);
 	}, 30_000);
-
-	const seenDids = new LRUCache<string, boolean>({ max: 100_000 });
-	const toIndexDids = new Set<string>();
-	const indexActorQueue = new PQueue({ concurrency: 2 });
 
 	let isShuttingDown = false;
 
@@ -66,11 +59,6 @@ export async function writeRecordWorker() {
 
 			// jsonToLex(obj) unnecessary because the record just gets stringified
 			toIndexRecords.push({ uri, cid, timestamp, obj });
-
-			if (!seenDids.has(did)) {
-				toIndexDids.add(did);
-				seenDids.set(did, true);
-			}
 		}
 
 		if (toIndexRecords.length > 100_000) {
@@ -119,33 +107,10 @@ export async function writeRecordWorker() {
 		}
 	}
 
-	async function processActorQueue() {
-		if (!isShuttingDown) {
-			setTimeout(processActorQueue, 2000);
-		}
-
-		if (toIndexDids.size > 0) {
-			const dids = [...toIndexDids];
-			toIndexDids.clear();
-			void indexActorQueue.add(async () => {
-				try {
-					const time = `Indexing actors: ${dids.length}`;
-					console.time(time);
-					await indexingSvc.indexActorsBulk(dids);
-					console.timeEnd(time);
-				} catch (e) {
-					console.error(`Error while indexing actors: ${e}`);
-					await Bun.write(`./failed-actors.jsonl`, dids.join(",") + "\n");
-				}
-			});
-		}
-	}
-
 	async function handleShutdown() {
 		console.log("Write record worker received shutdown signal");
 		isShuttingDown = true;
 		await processRecordQueue();
-		await processActorQueue();
 		process.send?.({ type: "shutdownComplete" });
 		process.exit(0);
 	}

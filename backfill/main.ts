@@ -397,7 +397,7 @@ if (cluster.isWorker) {
 			try {
 				const url = new URL(pds);
 				if (url.hostname.endsWith("bsky.network")) concurrency = 25;
-			} catch { }
+			} catch {}
 			pdsQueue = new PQueue({ concurrency });
 			pdsQueues.set(pds, pdsQueue);
 		}
