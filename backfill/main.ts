@@ -311,7 +311,7 @@ if (cluster.isWorker) {
 		process.exit(0);
 	});
 
-	let totalProcessed = 0, fetchedOverInterval = 0;
+	let totalProcessed = 0, fetchedOverInterval = 0, profilesSeenOverInterval = 0;
 
 	setInterval(async () => {
 		const newTotalProcessed = await redis.sCard("backfill:seen");
@@ -320,9 +320,10 @@ if (cluster.isWorker) {
 			fetched = fetchedOverInterval / 5;
 		totalProcessed = newTotalProcessed;
 		fetchedOverInterval = 0;
+		profilesSeenOverInterval = 0;
 
 		console.log(
-			`Processed repos: ${processed.toFixed(1)}/s | Fetched repos: ${fetched.toFixed(1)}/s`,
+			`Processed repos: ${processed.toFixed(1)}/s | Fetched repos: ${fetched.toFixed(1)}/s | Profiles seen: ${profilesSeenOverInterval.toFixed(1)}/s`,
 			`\n`,
 			`Fetch queue: ${fetchQueue.size} DIDs | ${fetchQueue.pending} pending`,
 		);
@@ -482,6 +483,10 @@ if (cluster.isWorker) {
 		if (writeCollectionWorkerId === undefined) {
 			console.warn(`Received commit for unknown collection ${message.collection}`);
 			return;
+		}
+
+		if (message.collection === "app.bsky.actor.profile") {
+			profilesSeenOverInterval += message.commits.length;
 		}
 
 		const writeCollectionWorker = cluster.workers?.[writeCollectionWorkerId];

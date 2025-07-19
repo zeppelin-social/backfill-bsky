@@ -92,8 +92,6 @@ export async function writeCollectionWorker() {
 			return;
 		}
 
-		if (msg.collection === "app.bsky.actor.profile") console.log(`received ${msg.commits.length} ${msg.collection}s`);
-
 		for (const commit of msg.commits) {
 			const { did, path, cid: _cid, timestamp, obj: _obj } = commit;
 			if (!did || !path || !_cid || !timestamp || !_obj) {

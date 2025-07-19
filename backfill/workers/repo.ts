@@ -87,7 +87,6 @@ export async function repoWorker() {
 				const path = `${collection}/${rkey}`;
 
 				if (!is(collection, record)) { // This allows us to set { validate: false } in the collection worker
-					if (collection === "app.bsky.actor.profile") console.log(`skipping at://${did}/${path}`);
 					continue;
 				}
 
