@@ -5,8 +5,8 @@ import {
 	IdResolver as _IdResolver,
 } from "@atproto/identity";
 import { DidPlcResolver } from "@atproto/identity";
-import { IndexingService as IdxService } from "@zeppelin-social/bsky-backfill/dist/data-plane/server/indexing";
-import { copyIntoTable } from "@zeppelin-social/bsky-backfill/dist/data-plane/server/util";
+import { IndexingService as IdxService } from "@zeppelin-social/bsky-backfill/dist/data-plane/server/indexing/index.js";
+import { copyIntoTable } from "@zeppelin-social/bsky-backfill/dist/data-plane/server/util.js";
 import { setTimeout as sleep } from "node:timers/promises";
 import PQueue from "p-queue";
 

@@ -7,9 +7,9 @@ import Queue from "bee-queue";
 import fs from "node:fs/promises";
 import path from "node:path";
 import PQueue from "p-queue";
-import { IdResolver, IndexingService } from "../indexingService";
-import type { FromWorkerMessage } from "../main";
-import { is } from "../util/lexicons";
+import { IdResolver, IndexingService } from "../indexingService.js";
+import type { FromWorkerMessage } from "../main.js";
+import { is } from "../util/lexicons.js";
 
 export type CommitData = {
 	did: string;

@@ -3,8 +3,8 @@ import { type Did, parseCanonicalResourceUri } from "@atcute/lexicons";
 import { Client as OpenSearchClient } from "@opensearch-project/opensearch";
 import fs from "node:fs/promises";
 import normalizeUrl from "normalize-url";
-import type { FromWorkerMessage } from "../main";
-import type { CommitMessage } from "./repo";
+import type { FromWorkerMessage } from "../main.js";
+import type { CommitMessage } from "./repo.js";
 
 const POST_INDEX = "palomar_post";
 const PROFILE_INDEX = "palomar_profile";

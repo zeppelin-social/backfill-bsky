@@ -7,9 +7,9 @@ import { AtUri } from "@atproto/syntax";
 import { BackgroundQueue, Database } from "@zeppelin-social/bsky-backfill";
 import { CID } from "multiformats/cid";
 import fs from "node:fs/promises";
-import { IdResolver, IndexingService } from "../indexingService";
-import type { FromWorkerMessage } from "../main";
-import type { CommitMessage } from "./repo";
+import { IdResolver, IndexingService } from "../indexingService.js";
+import type { FromWorkerMessage } from "../main.js";
+import type { CommitMessage } from "./repo.js";
 
 export type ToInsertCommit = { uri: AtUri; cid: CID; timestamp: string; obj: unknown };
 

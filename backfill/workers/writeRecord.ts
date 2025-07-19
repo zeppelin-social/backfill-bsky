@@ -4,10 +4,10 @@ import { AtUri } from "@atproto/syntax";
 import { BackgroundQueue, Database } from "@zeppelin-social/bsky-backfill";
 import { CID } from "multiformats/cid";
 import fs from "node:fs/promises";
-import { IdResolver, IndexingService } from "../indexingService";
-import type { FromWorkerMessage } from "../main";
-import type { CommitMessage } from "./repo";
-import type { ToInsertCommit } from "./writeCollection";
+import { IdResolver, IndexingService } from "../indexingService.js";
+import type { FromWorkerMessage } from "../main.js";
+import type { CommitMessage } from "./repo.js";
+import type { ToInsertCommit } from "./writeCollection.js";
 
 export async function writeRecordWorker() {
 	console.info(`Starting write record worker`);
