@@ -9,7 +9,7 @@ import PQueue from "p-queue";
 import { IdResolver, IndexingService } from "../indexingService.js";
 import type { FromWorkerMessage } from "../main.js";
 import { is } from "../util/lexicons.js";
-import { XRPCManager } from "../util/xrpc.js";
+import { RetryError, XRPCManager } from "../util/xrpc.js";
 
 export type CommitData = {
 	did: string;
@@ -51,13 +51,50 @@ export async function repoWorker() {
 
 	let commitData: Record<string, CommitData[]> = {};
 
-	const indexActorQueue = new PQueue({ concurrency: 2 });
+	const processRepoPQueue = new PQueue({ concurrency: 25 });
+	const indexActorPQueue = new PQueue({ concurrency: 2 });
 	const toIndexDids = new Set<string>();
 
 	let fetched = 0, parsed = 0;
 	let actorsIndexed = 0;
 
-	queue.process(25, async (job) => {
+	queue.process(25, (job) => processRepoPQueue.add(() => processRepo(job)));
+
+	queue.on("error", (err) => {
+		console.error("Queue error:", err);
+	});
+
+	queue.on("failed", (job, err) => {
+		console.error(`Job failed for ${job.data.did}:`, err);
+	});
+
+	process.on("SIGTERM", handleShutdown);
+	process.on("SIGINT", handleShutdown);
+
+	setTimeout(sendCommits, 200);
+
+	setTimeout(processActorQueue, 10_000);
+
+	setTimeout(function logIndexedActors() {
+		if (actorsIndexed > 0) {
+			console.log(`Indexed actors: ${actorsIndexed}`);
+		}
+		actorsIndexed = 0;
+		setTimeout(logIndexedActors, 60_000);
+	}, Math.random() * 60_000); // Spread out the logging a bit so there isn't a barrage of these
+
+	setInterval(() => {
+		process.send?.({ type: "count", fetched, parsed } satisfies FromWorkerMessage);
+		fetched = 0;
+		parsed = 0;
+	}, 1000);
+
+	setTimeout(function forceGC() {
+		Bun.gc(true);
+		setTimeout(forceGC, 30_000);
+	}, 30_000);
+
+	async function processRepo(job: Queue.Job<{ did: string; pds: string }>, attempt = 0) {
 		if (!process?.send) throw new Error("Not a worker process");
 
 		const { did, pds } = job.data;
@@ -67,15 +104,24 @@ export async function repoWorker() {
 			return;
 		}
 
-		const bytes = await xrpc.query(
-			pds,
-			async (client) =>
-				await client.get("com.atproto.sync.getRepo", {
-					params: { did: did as `did:plc:${string}` },
-					as: "stream",
-				}),
-		).catch(async (err) => {
-			if (
+		let bytes;
+		try {
+			bytes = await xrpc.query(
+				pds,
+				async (client) =>
+					await client.get("com.atproto.sync.getRepo", {
+						params: { did: did as `did:plc:${string}` },
+						as: "stream",
+					}),
+				attempt,
+			);
+		} catch (err) {
+			if (err instanceof RetryError) {
+				void processRepoPQueue.add(async () => {
+					await err.wait();
+					return processRepo(job, err.attempt + 1);
+				});
+			} else if (
 				["RepoDeactivated", "RepoTakendown", "RepoNotFound", "NotFound"].some((s) =>
 					`${err}`.includes(s)
 				)
@@ -84,8 +130,8 @@ export async function repoWorker() {
 			} else {
 				console.error(`Error fetching repo for ${did} --- ${err}`);
 			}
-		});
-		if (!bytes) return;
+			return;
+		}
 
 		fetched++;
 
@@ -136,18 +182,16 @@ export async function repoWorker() {
 			}
 		}
 		parsed++;
-	});
+	}
 
-	queue.on("error", (err) => {
-		console.error("Queue error:", err);
-	});
-
-	queue.on("failed", (job, err) => {
-		console.error(`Job failed for ${job.data.did}:`, err);
-	});
-
-	process.on("SIGTERM", handleShutdown);
-	process.on("SIGINT", handleShutdown);
+	function sendCommits() {
+		const entries = Object.entries(commitData);
+		commitData = {};
+		for (const [collection, commits] of entries) {
+			process.send!({ type: "commit", collection, commits } satisfies FromWorkerMessage);
+		}
+		setTimeout(sendCommits, 200);
+	}
 
 	async function processActorQueue() {
 		if (!isShuttingDown) {
@@ -157,7 +201,7 @@ export async function repoWorker() {
 		if (toIndexDids.size > 0) {
 			const dids = [...toIndexDids];
 			toIndexDids.clear();
-			void indexActorQueue.add(async () => {
+			void indexActorPQueue.add(async () => {
 				try {
 					await indexingSvc.indexActorsBulk(dids);
 					actorsIndexed += dids.length;
@@ -170,36 +214,6 @@ export async function repoWorker() {
 			});
 		}
 	}
-
-	setTimeout(function sendCommits() {
-		const entries = Object.entries(commitData);
-		commitData = {};
-		for (const [collection, commits] of entries) {
-			process.send!({ type: "commit", collection, commits } satisfies FromWorkerMessage);
-		}
-		setTimeout(sendCommits, 200);
-	}, 200);
-
-	setTimeout(processActorQueue, 10_000);
-
-	setTimeout(function logIndexedActors() {
-		if (actorsIndexed > 0) {
-			console.log(`Indexed actors: ${actorsIndexed}`);
-		}
-		actorsIndexed = 0;
-		setTimeout(logIndexedActors, 60_000);
-	}, Math.random() * 60_000); // Spread out the logging a bit so there isn't a barrage of these
-
-	setInterval(() => {
-		process.send?.({ type: "count", fetched, parsed } satisfies FromWorkerMessage);
-		fetched = 0;
-		parsed = 0;
-	});
-
-	setTimeout(function forceGC() {
-		Bun.gc(true);
-		setTimeout(forceGC, 30_000);
-	}, 30_000);
 
 	async function handleShutdown() {
 		isShuttingDown = true;

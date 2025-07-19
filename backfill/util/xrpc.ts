@@ -1,6 +1,6 @@
 import { Client, ok, simpleFetchHandler, type XRPCErrorPayload } from "@atcute/client";
-import { setTimeout as sleep } from "node:timers/promises";
 import { Agent, setGlobalDispatcher } from "undici";
+import { setTimeout as sleep } from "node:timers/promises";
 import type {} from "@atcute/atproto";
 
 type ExtractSuccessData<T> = T extends { ok: true; data: infer D } ? D : never;
@@ -26,9 +26,7 @@ export class XRPCManager {
 		try {
 			return await this.queryNoRetry(service, fn);
 		} catch (error) {
-			if (await this.shouldRetry(error, attempt++)) {
-				return await this.query(service, fn, attempt);
-			}
+			this.maybeRetry(error, service, attempt++);
 			throw error;
 		}
 	}
@@ -51,15 +49,17 @@ export class XRPCManager {
 		return this.clients.get(service) ?? this.createClient(service);
 	}
 
-	private async shouldRetry(error: unknown, attempt = 0) {
+	private maybeRetry(error: unknown, url: string, attempt = 0): never | false {
 		if (!error || typeof error !== "object") return false;
 
 		const errorStr = `${error}`.toLowerCase();
 		if (errorStr.includes("tcp") || errorStr.includes("network") || errorStr.includes("dns")) {
-			return true;
+			throw new RetryError("Network error", 0, attempt);
 		}
 
-		if (error instanceof DOMException && error.name === "TimeoutError") return true;
+		if (error instanceof DOMException && error.name === "TimeoutError") {
+			throw new RetryError("Timed out", 0, attempt);
+		}
 		if (error instanceof TypeError) return false;
 
 		// Error must have headers and, if it does have a status, the status must be 429
@@ -71,9 +71,13 @@ export class XRPCManager {
 				reset = parseInt(`${error.headers["ratelimit-reset"]}`);
 			}
 			if (reset) {
-				console.warn(`Rate limited, retrying in ${reset} seconds`, error);
-				await sleep(reset * 1000 - Date.now());
-				return true;
+				const resetMs = reset * 1000;
+				const delay = resetMs - Date.now();
+				throw new RetryError(
+					`Rate limited by ${url}, retrying in ${delay} seconds`,
+					resetMs,
+					attempt,
+				);
 			}
 		}
 
@@ -84,11 +88,26 @@ export class XRPCManager {
 			&& retryableStatusCodes.has(error.status)
 		) {
 			const delay = Math.pow(3, attempt + 1);
-			console.warn(`Retrying ${error.status} in ${delay} seconds`, error);
-			await sleep(delay * 1000);
-			return true;
+			const resetMs = Date.now() + delay * 1000;
+			throw new RetryError(
+				`Retrying ${error.status} in ${delay} seconds for ${url}`,
+				resetMs,
+				attempt,
+			);
 		}
 
 		return false;
+	}
+}
+
+export class RetryError extends Error {
+	constructor(message: string, public readonly resetMs: number, public readonly attempt: number) {
+		super(message);
+	}
+
+	async wait() {
+		const delay = this.resetMs - Date.now();
+		if (delay <= 0) return;
+		await sleep(delay);
 	}
 }
