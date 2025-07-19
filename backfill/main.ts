@@ -126,7 +126,8 @@ if (cluster.isWorker) {
 		removeOnFailure: true,
 	});
 
-	const REPOS_DIR = await fs.mkdir(path.join(os.tmpdir(), "backfill-bsky-repos"), { recursive: true });
+	const REPOS_DIR = path.join(os.tmpdir(), "backfill-bsky-repos")
+	await fs.mkdir(REPOS_DIR, { recursive: true });
 
 	const workers = {
 		repo: {},
