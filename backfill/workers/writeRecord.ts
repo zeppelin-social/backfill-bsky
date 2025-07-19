@@ -3,6 +3,7 @@ import { lexToJson } from "@atproto/lexicon";
 import { AtUri } from "@atproto/syntax";
 import { BackgroundQueue, Database } from "@zeppelin-social/bsky-backfill";
 import { CID } from "multiformats/cid";
+import fs from "node:fs/promises";
 import { IdResolver, IndexingService } from "../indexingService";
 import type { FromWorkerMessage } from "../main";
 import type { CommitMessage } from "./repo";
@@ -29,11 +30,6 @@ export async function writeRecordWorker() {
 	let toIndexRecords: ToInsertCommit[] = [];
 
 	let recordQueueTimer = setTimeout(processRecordQueue, 500);
-
-	setTimeout(function forceGC() {
-		Bun.gc(true);
-		setTimeout(forceGC, 30_000);
-	}, 30_000);
 
 	let isShuttingDown = false;
 
@@ -93,7 +89,7 @@ export async function writeRecordWorker() {
 			}
 		} catch (err) {
 			console.error(`Error processing queue`, err);
-			await Bun.write(
+			await fs.writeFile(
 				`./failed-records.jsonl`,
 				records.map((r) =>
 					JSON.stringify({
@@ -103,6 +99,7 @@ export async function writeRecordWorker() {
 						obj: lexToJson(r.obj),
 					})
 				).join("\n") + "\n",
+				{ flag: "a" },
 			);
 			console.timeEnd(time);
 		}

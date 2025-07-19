@@ -19,7 +19,12 @@ export type CommitData = {
 	obj: unknown;
 };
 
-export type CommitMessage = { type: "commit"; did?: string; collection: string; commits: CommitData[] };
+export type CommitMessage = {
+	type: "commit";
+	did?: string;
+	collection: string;
+	commits: CommitData[];
+};
 
 export async function repoWorker() {
 	for (const envVar of ["REPOS_DIR"]) {
@@ -39,7 +44,6 @@ export async function repoWorker() {
 	const db = new Database({
 		url: process.env.BSKY_DB_POSTGRES_URL,
 		schema: process.env.BSKY_DB_POSTGRES_SCHEMA,
-		poolSize: 20,
 		poolIdleTimeoutMs: 60_000,
 	});
 
@@ -57,7 +61,7 @@ export async function repoWorker() {
 	const toIndexDids = new Set<string>();
 	let actorsIndexed = 0;
 
-	queue.process(25, async (job) => {
+	queue.process(20, async (job) => {
 		if (!process?.send) throw new Error("Not a worker process");
 
 		const { did } = job.data;
@@ -69,7 +73,7 @@ export async function repoWorker() {
 
 		let repo: Uint8Array | null;
 		try {
-			repo = Bun.mmap(path.join(process.env.REPOS_DIR!, did));
+			repo = await fs.readFile(path.join(process.env.REPOS_DIR!, did));
 			if (!repo?.byteLength) throw "Got empty repo";
 		} catch (err) {
 			if (!`${err}`.includes("ENOENT")) {
@@ -122,7 +126,9 @@ export async function repoWorker() {
 
 			const entries = Object.entries(commitData);
 			for (const [collection, commits] of entries) {
-				process.send!({ type: "commit", did, collection, commits } satisfies FromWorkerMessage);
+				process.send!(
+					{ type: "commit", did, collection, commits } satisfies FromWorkerMessage,
+				);
 			}
 		} catch (err) {
 			console.warn(`iterateAtpRepo error for did ${did} --- ${err}`);
@@ -161,19 +167,21 @@ export async function repoWorker() {
 					actorsIndexed += dids.length;
 				} catch (e) {
 					console.error(`Error while indexing actors: ${e}`);
-					await Bun.write(`./failed-actors.jsonl`, dids.join(",") + "\n");
+					await fs.writeFile(`./failed-actors.jsonl`, dids.join(",") + "\n", {
+						flag: "a",
+					});
 				}
 			});
 		}
 	}
 
 	// setTimeout(function sendCommits() {
-		// const entries = Object.entries(commitData);
-		// commitData = {};
-		// for (const [collection, commits] of entries) {
-		// 	process.send!({ type: "commit", collection, commits } satisfies FromWorkerMessage);
-		// }
-		// setTimeout(sendCommits, 200);
+	// const entries = Object.entries(commitData);
+	// commitData = {};
+	// for (const [collection, commits] of entries) {
+	// 	process.send!({ type: "commit", collection, commits } satisfies FromWorkerMessage);
+	// }
+	// setTimeout(sendCommits, 200);
 	// }, 200);
 
 	setTimeout(processActorQueue, 10_000);
@@ -183,11 +191,6 @@ export async function repoWorker() {
 		actorsIndexed = 0;
 		setTimeout(logIndexedActors, 60_000);
 	}, Math.random() * 60_000); // Spread out the logging a bit so there isn't a barrage of these
-
-	setTimeout(function forceGC() {
-		Bun.gc(true);
-		setTimeout(forceGC, 30_000);
-	}, 30_000);
 
 	async function handleShutdown() {
 		isShuttingDown = true;

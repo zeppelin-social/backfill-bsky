@@ -332,11 +332,6 @@ if (cluster.isWorker) {
 		);
 	}, 5_000);
 
-	setTimeout(function forceGC() {
-		Bun.gc(true);
-		setTimeout(forceGC, 30_000);
-	}, 30_000);
-
 	async function main() {
 		console.log("Reading DIDs");
 		const seenDids = new Set(await redis.sMembers("backfill:seen"));
@@ -417,7 +412,7 @@ if (cluster.isWorker) {
 					params: { did: did as `did:${string}` },
 				});
 				if (repo?.length) {
-					await Bun.write(path.join(REPOS_DIR, did), repo);
+					await fs.writeFile(path.join(REPOS_DIR, did), repo, { flag: "w" });
 					await queue.createJob({ did }).setId(did).save();
 					fetchedOverInterval++;
 				}

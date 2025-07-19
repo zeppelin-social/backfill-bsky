@@ -1,6 +1,7 @@
 import type { AppBskyActorProfile, AppBskyFeedPost } from "@atcute/bluesky";
 import { type Did, parseCanonicalResourceUri } from "@atcute/lexicons";
 import { Client as OpenSearchClient } from "@opensearch-project/opensearch";
+import fs from "node:fs/promises";
 import normalizeUrl from "normalize-url";
 import type { FromWorkerMessage } from "../main";
 import type { CommitMessage } from "./repo";
@@ -30,11 +31,6 @@ export async function openSearchWorker() {
 	let profileQueue: Array<ProfileDoc> = [];
 
 	let queueTimer = setTimeout(processQueue, 2000);
-
-	setTimeout(function forceGC() {
-		Bun.gc(true);
-		setTimeout(forceGC, 30_000);
-	}, 30_000);
 
 	let isShuttingDown = false;
 
@@ -119,9 +115,10 @@ export async function openSearchWorker() {
 			}
 		} catch (err) {
 			console.error(`Error processing OpenSearch queue`, err);
-			await Bun.write(
+			await fs.writeFile(
 				`./failed-search.jsonl`,
 				datasource.map((r) => JSON.stringify(r)).join("\n") + "\n",
+				{ flag: "a" },
 			);
 			console.timeEnd(time);
 		}

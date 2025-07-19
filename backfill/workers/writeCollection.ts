@@ -6,6 +6,7 @@ import { BlobRef, lexToJson } from "@atproto/lexicon";
 import { AtUri } from "@atproto/syntax";
 import { BackgroundQueue, Database } from "@zeppelin-social/bsky-backfill";
 import { CID } from "multiformats/cid";
+import fs from "node:fs/promises";
 import { IdResolver, IndexingService } from "../indexingService";
 import type { FromWorkerMessage } from "../main";
 import type { CommitMessage } from "./repo";
@@ -67,11 +68,6 @@ export async function writeCollectionWorker() {
 	}
 
 	let queueTimer = setTimeout(processQueue, 1000);
-
-	setTimeout(function forceGC() {
-		Bun.gc(true);
-		setTimeout(forceGC, 30_000);
-	}, 30_000);
 
 	let isShuttingDown = false;
 
@@ -154,7 +150,7 @@ export async function writeCollectionWorker() {
 			console.error(`Error processing queue for ${collections.join(", ")}`, err);
 			await Promise.all(
 				records.entries().map(([collection, recs]) =>
-					Bun.write(
+					fs.writeFile(
 						`./failed-${collection}.jsonl`,
 						recs.map((r) =>
 							JSON.stringify({
@@ -164,6 +160,7 @@ export async function writeCollectionWorker() {
 								obj: lexToJson(r.obj),
 							})
 						).join("\n") + "\n",
+						{ flag: "a" },
 					)
 				),
 			);
