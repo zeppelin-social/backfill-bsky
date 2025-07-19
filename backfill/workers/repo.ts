@@ -8,7 +8,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import PQueue from "p-queue";
 import { IdResolver, IndexingService } from "../indexingService";
-import { is } from "../util/lexicons";
+import { is, lexicons } from "../util/lexicons";
 
 export type CommitData = {
 	did: string;
@@ -83,7 +83,6 @@ export async function repoWorker() {
 				const path = `${collection}/${rkey}`;
 
 				if (!is(collection, record)) { // This allows us to set { validate: false } in the collection worker
-					console.warn(`skipping at://${did}/${path}`);
 					continue;
 				}
 
@@ -143,7 +142,7 @@ export async function repoWorker() {
 
 	async function processActorQueue() {
 		if (!isShuttingDown) {
-			setTimeout(processActorQueue, 2000);
+			setTimeout(processActorQueue, 10_000);
 		}
 
 		if (toIndexDids.size > 0) {
@@ -173,7 +172,8 @@ export async function repoWorker() {
 		setTimeout(sendCommits, 200);
 	}, 200);
 
-	setTimeout(processActorQueue, 2000);
+	// Stagger the logging a bit the first time
+	setTimeout(processActorQueue, 10_000 + (Math.random() * 15_000));
 
 	setTimeout(function forceGC() {
 		Bun.gc(true);
