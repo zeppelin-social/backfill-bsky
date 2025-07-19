@@ -201,7 +201,7 @@ if (cluster.isWorker) {
 	};
 
 	const numCPUs = os.availableParallelism();
-	const repoWorkerCount = numCPUs <= 10 ? 32 : numCPUs >= 32 ? 96 : numCPUs * 3;
+	const repoWorkerCount = Math.max(20, Math.min(numCPUs * 2, 48));
 	for (let i = 3; i < repoWorkerCount; i++) {
 		spawnRepoWorker();
 	}
@@ -396,7 +396,7 @@ if (cluster.isWorker) {
 			let concurrency = 10;
 			try {
 				const url = new URL(pds);
-				if (url.hostname.endsWith("bsky.network")) concurrency = 25;
+				if (url.hostname.endsWith("bsky.network")) concurrency = 20;
 			} catch {}
 			pdsQueue = new PQueue({ concurrency });
 			pdsQueues.set(pds, pdsQueue);
@@ -416,7 +416,6 @@ if (cluster.isWorker) {
 					await Bun.write(path.join(REPOS_DIR, did), repo);
 					await queue.createJob({ did }).setId(did).save();
 					fetchedOverInterval++;
-					repo.fill(0, 0, -1);
 				}
 			} catch (err) {
 				if (

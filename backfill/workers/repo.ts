@@ -56,6 +56,7 @@ export async function repoWorker() {
 
 	const indexActorQueue = new PQueue({ concurrency: 2 });
 	const toIndexDids = new Set<string>();
+	let actorsIndexed = 0;
 
 	queue.process(25, async (job) => {
 		if (!process?.send) throw new Error("Not a worker process");
@@ -79,6 +80,7 @@ export async function repoWorker() {
 
 		try {
 			const now = Date.now();
+			let i = 0;
 			for await (const { record, rkey, collection, cid } of iterateAtpRepo(repo)) {
 				const path = `${collection}/${rkey}`;
 
@@ -111,7 +113,9 @@ export async function repoWorker() {
 				};
 
 				(commitData[collection] ??= []).push(data);
+				i++;
 			}
+			console.log(`[${process.pid}] parsed ${i} records`);
 			await redis.sAdd("backfill:seen", did);
 			toIndexDids.add(did);
 		} catch (err) {
@@ -121,7 +125,6 @@ export async function repoWorker() {
 				await redis.sAdd("backfill:seen", did);
 			}
 		} finally {
-			repo.fill(0, 0, -1);
 			repo = null;
 			await fs.unlink(path.join(process.env.REPOS_DIR!, did));
 		}
@@ -129,12 +132,10 @@ export async function repoWorker() {
 
 	queue.on("error", (err) => {
 		console.error("Queue error:", err);
-		handleShutdown();
 	});
 
 	queue.on("failed", (job, err) => {
 		console.error(`Job failed for ${job.data.did}:`, err);
-		handleShutdown();
 	});
 
 	process.on("SIGTERM", handleShutdown);
@@ -150,10 +151,8 @@ export async function repoWorker() {
 			toIndexDids.clear();
 			void indexActorQueue.add(async () => {
 				try {
-					const time = `Indexing actors: ${dids.length}`;
-					console.time(time);
 					await indexingSvc.indexActorsBulk(dids);
-					console.timeEnd(time);
+					actorsIndexed += dids.length;
 				} catch (e) {
 					console.error(`Error while indexing actors: ${e}`);
 					await Bun.write(`./failed-actors.jsonl`, dids.join(",") + "\n");
@@ -164,16 +163,24 @@ export async function repoWorker() {
 
 	setTimeout(function sendCommits() {
 		const entries = Object.entries(commitData);
+		let i = 0;
 		for (const [collection, commits] of entries) {
+			i += commits.length;
 			process.send!({ type: "commit", collection, commits } satisfies CommitMessage);
-			commitData[collection] = [];
+			commitData[collection].length = 0;
 		}
+		console.log(`[${process.pid}] sent ${i} records`);
 		commitData = {};
 		setTimeout(sendCommits, 200);
 	}, 200);
 
-	// Stagger the logging a bit the first time
-	setTimeout(processActorQueue, 10_000 + (Math.random() * 15_000));
+	setTimeout(processActorQueue, 10_000);
+
+	setTimeout(function logIndexedActors() {
+		console.log(`Indexed actors: ${actorsIndexed}`);
+		actorsIndexed = 0;
+		setTimeout(logIndexedActors, 60_000);
+	}, Math.random() * 60_000); // Spread out the logging a bit so there isn't a barrage of these
 
 	setTimeout(function forceGC() {
 		Bun.gc(true);

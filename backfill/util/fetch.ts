@@ -1,5 +1,4 @@
 import { readFileSync, writeFileSync } from "node:fs";
-import PQueue from "p-queue";
 import { errors, type Headers } from "undici";
 
 export async function fetchPdses(): Promise<Array<string>> {
@@ -22,8 +21,6 @@ export async function* fetchAllDids() {
 	yield* roundRobinInterleaveIterators(pdsesToFetchFrom.map(fetchPdsDids));
 }
 
-const listReposQueue = new PQueue({ concurrency: 25 });
-
 async function* fetchPdsDids(pds: string) {
 	let cursor = getPdsCursorCache()?.[pds] ?? "";
 	if (cursor === "DONE") return console.warn(`Skipping exhausted PDS ${pds}`);
@@ -31,9 +28,9 @@ async function* fetchPdsDids(pds: string) {
 	let fetched = 0;
 	while (true) {
 		try {
-			const res = await listReposQueue.add(() =>
-				fetch(url + "?limit=1000&cursor=" + cursor, { signal: AbortSignal.timeout(10_000) })
-			);
+			const res = await fetch(url + "?limit=1000&cursor=" + cursor, {
+				signal: AbortSignal.timeout(10_000),
+			});
 			if (!res?.ok) {
 				if (res?.status === 429) {
 					await processRatelimitHeaders(res.headers, url);
