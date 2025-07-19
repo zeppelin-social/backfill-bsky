@@ -23,7 +23,7 @@ import { type CommitMessage, repoWorker } from "./workers/repo.js";
 import { writeCollectionWorker, writeWorkerAllocations } from "./workers/writeCollection.js";
 import { writeRecordWorker } from "./workers/writeRecord.js";
 
-export type FromWorkerMessage = CommitMessage | { type: "shutdownComplete" };
+export type FromWorkerMessage = CommitMessage | { type: "shutdownComplete" } | { type: "didCount", count: number };
 
 declare global {
 	namespace NodeJS {
@@ -312,15 +312,13 @@ if (cluster.isWorker) {
 		process.exit(0);
 	});
 
-	let totalProcessed = 0, fetchedOverInterval = 0, profilesSeenOverInterval = 0;
+	let didsOverInterval = 0, fetchedOverInterval = 0, profilesSeenOverInterval = 0;
 
 	setInterval(async () => {
-		const newTotalProcessed = await redis.sCard("backfill:seen");
-
-		const processed = (newTotalProcessed - totalProcessed) / 5,
+		const processed = didsOverInterval / 5,
 			fetched = fetchedOverInterval / 5,
 			profilesSeen = profilesSeenOverInterval / 5;
-		totalProcessed = newTotalProcessed;
+		didsOverInterval = 0;
 		fetchedOverInterval = 0;
 		profilesSeenOverInterval = 0;
 
@@ -337,7 +335,6 @@ if (cluster.isWorker) {
 		console.log("Reading DIDs");
 		const seenDids = new Set(await redis.sMembers("backfill:seen"));
 		console.log(`Seen: ${seenDids.size} DIDs`);
-		totalProcessed = seenDids.size;
 
 		for await (const [did, pds] of fetchAllDids()) {
 			if (isShuttingDown) break;
@@ -464,6 +461,11 @@ if (cluster.isWorker) {
 		if (message.type === "shutdownComplete") {
 			if (!isShuttingDown) handleWorkerExit(worker, 0, "SIGINT");
 			if (!worker.process.killed) worker.kill();
+			return;
+		}
+
+		if (message.type === "didCount") {
+			didsOverInterval += message.count;
 			return;
 		}
 

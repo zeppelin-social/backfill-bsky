@@ -115,7 +115,7 @@ export async function repoWorker() {
 
 				(commitData[collection] ??= []).push(data);
 			}
-			
+
 			await redis.sAdd("backfill:seen", did);
 			toIndexDids.add(did);
 		} catch (err) {
@@ -147,6 +147,8 @@ export async function repoWorker() {
 		}
 
 		if (toIndexDids.size > 0) {
+			process.send!({ type: "didCount", count: toIndexDids.size } satisfies FromWorkerMessage);
+
 			const dids = [...toIndexDids];
 			toIndexDids.clear();
 			void indexActorQueue.add(async () => {
