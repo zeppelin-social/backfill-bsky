@@ -72,7 +72,6 @@ export async function repoWorker() {
 			return;
 		}
 
-		console.time("read repo " + did);
 		let repo: Uint8Array | null;
 		try {
 			repo = await fs.readFile(path.join(process.env.REPOS_DIR!, did));
@@ -83,14 +82,12 @@ export async function repoWorker() {
 			}
 			return;
 		}
-		console.timeEnd("read repo " + did);
 
 		const commitData: Record<string, CommitData[]> = {};
 
 		try {
 			const now = Date.now();
 			const reader = RepoReader.fromUint8Array(repo);
-			console.time("iterateAtpRepo " + did);
 			for await (const { record, rkey, collection, cid } of reader) {
 				const path = `${collection}/${rkey}`;
 
@@ -127,8 +124,6 @@ export async function repoWorker() {
 
 			await redis.sAdd("backfill:seen", did);
 			toIndexDids.add(did);
-
-			console.timeEnd("iterateAtpRepo " + did);
 
 			const entries = Object.entries(commitData);
 			for (const [collection, commits] of entries) {
