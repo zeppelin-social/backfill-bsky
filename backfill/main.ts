@@ -23,7 +23,10 @@ import { type CommitMessage, repoWorker } from "./workers/repo.js";
 import { writeCollectionWorker, writeWorkerAllocations } from "./workers/writeCollection.js";
 import { writeRecordWorker } from "./workers/writeRecord.js";
 
-export type FromWorkerMessage = CommitMessage | { type: "shutdownComplete" } | { type: "didCount", count: number };
+export type FromWorkerMessage = CommitMessage | { type: "shutdownComplete" } | {
+	type: "didCount";
+	count: number;
+};
 
 declare global {
 	namespace NodeJS {
@@ -124,9 +127,10 @@ if (cluster.isWorker) {
 	const queue = new Queue<{ did: string }>("repo-processing", {
 		removeOnSuccess: true,
 		removeOnFailure: true,
+		isWorker: false,
 	});
 
-	const REPOS_DIR = path.join(os.tmpdir(), "backfill-bsky-repos")
+	const REPOS_DIR = path.join(os.tmpdir(), "backfill-bsky-repos");
 	await fs.mkdir(REPOS_DIR, { recursive: true });
 
 	const workers = {

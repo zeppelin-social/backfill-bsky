@@ -34,6 +34,7 @@ export async function repoWorker() {
 	const queue = new Queue<{ did: string }>("repo-processing", {
 		removeOnSuccess: true,
 		removeOnFailure: true,
+		isWorker: true,
 	});
 
 	const db = new Database({
@@ -118,6 +119,8 @@ export async function repoWorker() {
 
 			await redis.sAdd("backfill:seen", did);
 			toIndexDids.add(did);
+
+			process.send!({ type: "didCount", count: 1 } satisfies FromWorkerMessage);
 		} catch (err) {
 			console.warn(`iterateAtpRepo error for did ${did} --- ${err}`);
 			if (`${err}`.includes("invalid simple value")) {
@@ -147,8 +150,6 @@ export async function repoWorker() {
 		}
 
 		if (toIndexDids.size > 0) {
-			process.send!({ type: "didCount", count: toIndexDids.size } satisfies FromWorkerMessage);
-
 			const dids = [...toIndexDids];
 			toIndexDids.clear();
 			void indexActorQueue.add(async () => {
