@@ -51,14 +51,14 @@ export async function repoWorker() {
 
 	let commitData: Record<string, CommitData[]> = {};
 
-	const processRepoPQueue = new PQueue({ concurrency: 25 });
+	const processRepoPQueue = new PQueue({ concurrency: 50 });
 	const indexActorPQueue = new PQueue({ concurrency: 2 });
 	const toIndexDids = new Set<string>();
 
 	let fetched = 0, parsed = 0;
 	let actorsIndexed = 0;
 
-	queue.process(25, (job) => processRepoPQueue.add(() => processRepo(job)));
+	queue.process(30, (job) => processRepoPQueue.add(() => processRepo(job)));
 
 	queue.on("error", (err) => {
 		console.error("Queue error:", err);
