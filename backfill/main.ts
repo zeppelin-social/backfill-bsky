@@ -312,15 +312,15 @@ if (cluster.isWorker) {
 		process.exit(0);
 	});
 
-	const newDidsSeen = new Set<string>();
-	let fetchedOverInterval = 0, profilesSeenOverInterval = 0;
+	let totalProcessed = 0, fetchedOverInterval = 0, profilesSeenOverInterval = 0;
 
 	setInterval(async () => {
-		const processed = newDidsSeen.size / 5,
+		const newTotalProcessed = await redis.sCard("backfill:seen");
+
+		const processed = (newTotalProcessed - totalProcessed) / 5,
 			fetched = fetchedOverInterval / 5,
 			profilesSeen = profilesSeenOverInterval / 5;
-
-		newDidsSeen.clear();
+		totalProcessed = newTotalProcessed;
 		fetchedOverInterval = 0;
 		profilesSeenOverInterval = 0;
 
@@ -337,6 +337,7 @@ if (cluster.isWorker) {
 		console.log("Reading DIDs");
 		const seenDids = new Set(await redis.sMembers("backfill:seen"));
 		console.log(`Seen: ${seenDids.size} DIDs`);
+		totalProcessed = seenDids.size;
 
 		for await (const [did, pds] of fetchAllDids()) {
 			if (isShuttingDown) break;
@@ -486,8 +487,6 @@ if (cluster.isWorker) {
 		if (message.collection === "app.bsky.actor.profile") {
 			profilesSeenOverInterval += message.commits.length;
 		}
-
-		if (message.did) newDidsSeen.add(message.did);
 
 		const writeCollectionWorker = cluster.workers?.[writeCollectionWorkerId];
 		const writeRecordWorker = Math.random() < 0.5

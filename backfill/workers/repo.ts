@@ -19,12 +19,7 @@ export type CommitData = {
 	obj: unknown;
 };
 
-export type CommitMessage = {
-	type: "commit";
-	did?: string;
-	collection: string;
-	commits: CommitData[];
-};
+export type CommitMessage = { type: "commit"; collection: string; commits: CommitData[] };
 
 export async function repoWorker() {
 	for (const envVar of ["REPOS_DIR"]) {
@@ -57,11 +52,12 @@ export async function repoWorker() {
 
 	let isShuttingDown = false;
 
+	let commitData: Record<string, CommitData[]> = {};
+
 	const indexActorQueue = new PQueue({ concurrency: 2 });
 	const toIndexDids = new Set<string>();
 	let actorsIndexed = 0;
 
-	let i = 0;
 	queue.process(10, async (job) => {
 		if (!process?.send) throw new Error("Not a worker process");
 
@@ -82,8 +78,6 @@ export async function repoWorker() {
 			}
 			return;
 		}
-
-		const commitData: Record<string, CommitData[]> = {};
 
 		try {
 			const now = Date.now();
@@ -121,18 +115,9 @@ export async function repoWorker() {
 
 				(commitData[collection] ??= []).push(data);
 			}
-
+			
 			await redis.sAdd("backfill:seen", did);
 			toIndexDids.add(did);
-
-			const entries = Object.entries(commitData);
-			for (const [collection, commits] of entries) {
-				process.send!(
-					{ type: "commit", did, collection, commits } satisfies FromWorkerMessage,
-				);
-			}
-
-			i++;
 		} catch (err) {
 			console.warn(`iterateAtpRepo error for did ${did} --- ${err}`);
 			if (`${err}`.includes("invalid simple value")) {
@@ -178,27 +163,27 @@ export async function repoWorker() {
 		}
 	}
 
-	// setTimeout(function sendCommits() {
-	// const entries = Object.entries(commitData);
-	// commitData = {};
-	// for (const [collection, commits] of entries) {
-	// 	process.send!({ type: "commit", collection, commits } satisfies FromWorkerMessage);
-	// }
-	// setTimeout(sendCommits, 200);
-	// }, 200);
+	setTimeout(function sendCommits() {
+		const entries = Object.entries(commitData);
+		commitData = {};
+		for (const [collection, commits] of entries) {
+			process.send!({ type: "commit", collection, commits } satisfies FromWorkerMessage);
+		}
+		setTimeout(sendCommits, 200);
+	}, 200);
 
 	setTimeout(processActorQueue, 10_000);
-
-	setInterval(() => {
-		console.log(`parsed repos: ${(i / 5).toFixed(1)}/s`);
-		i = 0;
-	}, 5000);
 
 	setTimeout(function logIndexedActors() {
 		console.log(`Indexed actors: ${actorsIndexed}`);
 		actorsIndexed = 0;
 		setTimeout(logIndexedActors, 60_000);
 	}, Math.random() * 60_000); // Spread out the logging a bit so there isn't a barrage of these
+
+	setTimeout(function forceGC() {
+		Bun.gc(true);
+		setTimeout(forceGC, 30_000);
+	}, 30_000);
 
 	async function handleShutdown() {
 		isShuttingDown = true;
