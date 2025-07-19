@@ -1,6 +1,6 @@
 import { Client, ok, simpleFetchHandler, type XRPCErrorPayload } from "@atcute/client";
-import { Agent, setGlobalDispatcher } from "undici";
 import { setTimeout as sleep } from "node:timers/promises";
+import { Agent, setGlobalDispatcher } from "undici";
 import type {} from "@atcute/atproto";
 
 type ExtractSuccessData<T> = T extends { ok: true; data: infer D } ? D : never;

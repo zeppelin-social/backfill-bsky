@@ -2,6 +2,7 @@ import { createClient } from "@redis/client";
 import * as bsky from "@zeppelin-social/bsky-backfill";
 import Queue from "bee-queue";
 import CacheableLookup from "cacheable-lookup";
+import LargeSet from "large-set";
 import { LRUCache } from "lru-cache";
 import cluster, { type Worker } from "node:cluster";
 import fs from "node:fs/promises";
@@ -317,7 +318,10 @@ if (cluster.isWorker) {
 
 	async function main() {
 		console.log("Reading DIDs");
-		const seenDids = new Set(await redis.sMembers("backfill:seen"));
+		const seenDids = new LargeSet();
+		for (const did of await redis.sMembers("backfill:seen")) {
+			seenDids.add(did);
+		}
 		console.log(`Seen: ${seenDids.size} DIDs`);
 
 		for await (const [did, pds] of fetchAllDids()) {
