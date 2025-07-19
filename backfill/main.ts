@@ -201,7 +201,7 @@ if (cluster.isWorker) {
 	};
 
 	const numCPUs = os.availableParallelism();
-	const repoWorkerCount = Math.max(20, Math.min(numCPUs * 2, 48));
+	const repoWorkerCount = Math.max(16, Math.min(numCPUs * 2, 32));
 	for (let i = 3; i < repoWorkerCount; i++) {
 		spawnRepoWorker();
 	}
@@ -318,6 +318,7 @@ if (cluster.isWorker) {
 
 		const processed = (newTotalProcessed - totalProcessed) / 5,
 			fetched = fetchedOverInterval / 5;
+		totalProcessed = newTotalProcessed;
 		fetchedOverInterval = 0;
 
 		console.log(

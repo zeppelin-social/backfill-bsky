@@ -1,4 +1,4 @@
-import { iterateAtpRepo } from "@atcute/car";
+import { RepoReader } from "@atcute/car/v4";
 import { parse as parseTID } from "@atcute/tid";
 import { MemoryCache } from "@atproto/identity";
 import { createClient } from "@redis/client";
@@ -8,7 +8,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import PQueue from "p-queue";
 import { IdResolver, IndexingService } from "../indexingService";
-import { is, lexicons } from "../util/lexicons";
+import { is } from "../util/lexicons";
 
 export type CommitData = {
 	did: string;
@@ -81,7 +81,8 @@ export async function repoWorker() {
 		try {
 			const now = Date.now();
 			let i = 0;
-			for await (const { record, rkey, collection, cid } of iterateAtpRepo(repo)) {
+			const reader = RepoReader.fromUint8Array(repo);
+			for await (const { record, rkey, collection, cid } of reader) {
 				const path = `${collection}/${rkey}`;
 
 				if (!is(collection, record)) { // This allows us to set { validate: false } in the collection worker
@@ -169,7 +170,7 @@ export async function repoWorker() {
 			process.send!({ type: "commit", collection, commits } satisfies CommitMessage);
 			commitData[collection].length = 0;
 		}
-		console.log(`[${process.pid}] sent ${i} records`);
+		if (i > 0) console.log(`[${process.pid}] sent ${i} records`);
 		commitData = {};
 		setTimeout(sendCommits, 200);
 	}, 200);

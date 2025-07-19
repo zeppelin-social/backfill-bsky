@@ -26,7 +26,7 @@
 	},
 	"dependencies": {
 		"@atcute/bluesky": "^3.1.5",
-		"@atcute/car": "^3.0.5",
+		"@atcute/car": "^3.1.1",
 		"@atcute/cbor": "^2.2.4",
 		"@atcute/client": "^2.0.7",
 		"@atcute/lexicons": "^1.1.0",
