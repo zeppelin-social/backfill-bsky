@@ -35,6 +35,7 @@ import {
 	type ProfileDoc,
 } from "../backfill/workers/opensearch";
 import { jsonToLex, writeWorkerAllocations } from "../backfill/workers/writeCollection";
+import { is } from "../backfill/util/lexicons";
 
 declare global {
 	namespace NodeJS {
@@ -556,13 +557,19 @@ async function retryFailedWrites(db: Database) {
 					!isCanonicalResourceUri(msg.uri) || !isCid(msg.cid)
 					|| isNaN(new Date(msg.timestamp).getTime())
 				) continue;
+
+				const atUri = new AtUri(msg.uri);
+				if (!is(atUri.collection, msg.obj)) {
+					throw new Error(`Record ${msg.uri} failed lexicon validation`);
+				}
+
 				await indexingSvc.indexRecord(
-					new AtUri(msg.uri),
+					atUri,
 					CID.parse(msg.cid),
 					jsonToLex(msg.obj),
 					WriteOpAction.Create,
 					msg.timestamp,
-					{ disableNotifs: true },
+					{ disableNotifs: true, skipValidation: true },
 				);
 			} catch (e) {
 				console.warn(`Skipping record ${msg.uri}, ${e}`);
