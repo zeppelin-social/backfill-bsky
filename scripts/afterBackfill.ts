@@ -25,8 +25,11 @@ import { sql } from "kysely";
 import { CID } from "multiformats/cid";
 import fs from "node:fs";
 import path from "node:path";
+import readline from "node:readline/promises";
+import { Client as OpenSearchClient } from "@opensearch-project/opensearch";
 import { IndexingService } from "../backfill/indexingService";
 import { jsonToLex, writeWorkerAllocations } from "../backfill/workers/writeCollection";
+import { POST_INDEX, PROFILE_INDEX, type PostDoc, type ProfileDoc } from "./workers/opensearch";
 
 declare global {
 	namespace NodeJS {
@@ -72,7 +75,7 @@ async function main() {
 
 	console.log("beginning backfill...");
 
-	await reindexFailedRecords(db);
+	await retryFailedWrites(db);
 
 	await retryInParallel(
 		["post", backfillPostAggregates(db, state)],
@@ -470,7 +473,15 @@ async function validateReply(db: DatabaseSchema, creator: string, reply: ReplyRe
 	return { invalidReplyRoot: invalidRoot, violatesThreadGate: violatesGate };
 }
 
-async function reindexFailedRecords(db: Database) {
+async function retryFailedWrites(db: Database) {
+	const osClient = new OpenSearchClient({
+		node: process.env.OPENSEARCH_URL,
+		auth: {
+			username: process.env.OPENSEARCH_USERNAME,
+			password: process.env.OPENSEARCH_PASSWORD,
+		},
+	});
+
 	const idResolver = new IdResolver({
 		plcUrl: process.env.BSKY_DID_PLC_URL,
 		didCache: new MemoryCache(),
@@ -479,17 +490,37 @@ async function reindexFailedRecords(db: Database) {
 
 	const collections = writeWorkerAllocations.flat();
 
-	await Promise.all(collections.map(async (collection) => {
-		const messages = fs.readFileSync(`./failed-${collection}.jsonl`, "utf8").split("\n").map((
-			m,
-		) => JSON.parse(m) as {
-			uri: string;
-			cid: string;
-			timestamp: string;
-			obj: Record<string, unknown>;
+	const failedActorDids = fs.readFileSync("./failed-actors.jsonl", "utf8").split("\n").flatMap(s => s.split(","));
+	const failedSearchDocs = fs.readFileSync("./failed-search.jsonl", "utf8").split("\n").map(s => JSON.parse(s) as PostDoc | ProfileDoc);
+
+	const actorPromises = failedActorDids.map(async (did) => {
+		await indexingSvc.indexHandle(did, new Date().toISOString())
+	});
+
+	const searchPromises = failedSearchDocs.map(async (doc) => {
+		const isPost = "record_rkey" in doc;
+		try {
+			await osClient.index({ index: isPost ? POST_INDEX : PROFILE_INDEX, body: doc })
+		} catch (e) {
+			console.warn(`Skipping search doc ${doc.did} ${isPost ? doc.record_rkey : "profile"}, ${e}`);
+		}
+	});
+
+	const recordsPromise = (async () => {
+		const fstream = fs.createReadStream("./failed-records.jsonl");
+		const rl = readline.createInterface({
+			input: fstream,
+			crlfDelay: Infinity,
 		});
 
-		for (const msg of messages) {
+		for await (const line of rl) {
+			const msg = JSON.parse(line) as {
+				uri: string;
+				cid: string;
+				timestamp: string;
+				obj: Record<string, unknown>;
+			};
+
 			try {
 				if (
 					!isCanonicalResourceUri(msg.uri) || !isCid(msg.cid)
@@ -507,8 +538,50 @@ async function reindexFailedRecords(db: Database) {
 				console.warn(`Skipping record ${msg.uri}, ${e}`);
 			}
 		}
-		console.log(`Done reindexing failed records for ${collection}`);
-	}));
+	})();
+
+	const collectionPromises = collections.map(async (collection) => {
+		const fstream = fs.createReadStream(`./failed-${collection}.jsonl`);
+		const rl = readline.createInterface({
+			input: fstream,
+			crlfDelay: Infinity,
+		});
+
+		for await (const line of rl) {
+			const msg = JSON.parse(line) as {
+				uri: string;
+				cid: string;
+				timestamp: string;
+				obj: Record<string, unknown>;
+			};
+
+			try {
+				if (
+					!isCanonicalResourceUri(msg.uri) || !isCid(msg.cid)
+					|| isNaN(new Date(msg.timestamp).getTime())
+				) continue;
+				await indexingSvc.indexRecord(
+					new AtUri(msg.uri),
+					CID.parse(msg.cid),
+					jsonToLex(msg.obj),
+					WriteOpAction.Create,
+					msg.timestamp,
+					{ disableNotifs: true },
+				);
+			} catch (e) {
+				console.warn(`Skipping record ${msg.uri}, ${e}`);
+			}
+		}
+	});
+
+	await Promise.all([
+		...actorPromises,
+		...searchPromises,
+		...collectionPromises,
+		recordsPromise
+	]);
+
+	console.log("Done reindexing failed records");
 }
 
 async function validatePostEmbedsBulk(

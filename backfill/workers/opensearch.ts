@@ -6,8 +6,8 @@ import normalizeUrl from "normalize-url";
 import type { FromWorkerMessage } from "../main.js";
 import type { CommitMessage } from "./repo.js";
 
-const POST_INDEX = "palomar_post";
-const PROFILE_INDEX = "palomar_profile";
+export const POST_INDEX = "palomar_post";
+export const PROFILE_INDEX = "palomar_profile";
 const ES_INDEXES = [POST_INDEX, PROFILE_INDEX];
 
 export async function openSearchWorker() {
@@ -434,7 +434,7 @@ function isEmoji(codePoint: number): boolean {
 		|| (codePoint >= 0x2600 && codePoint <= 0x26FF);
 }
 
-type ProfileDoc = {
+export type ProfileDoc = {
 	doc_index_ts: string;
 	did: string;
 	record_cid: string;
@@ -451,7 +451,7 @@ type ProfileDoc = {
 	has_banner: boolean;
 };
 
-type PostDoc = {
+export type PostDoc = {
 	doc_index_ts: string;
 	did: string;
 	record_rkey: string;
