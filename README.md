@@ -21,7 +21,7 @@ Backfills a Bluesky AppView with historical commit data. This is expected to run
 2. `bun buffer` — will run in the background until step 4 to buffer relay events while backfill is running.
     - Requires: `BUFFER_REPO_PROVIDER` — a `wss://` URL to the relay.
     - Recommended to run with `pm2` or `forever` to ensure it runs in the background.
-3. `bun backfill` — will backfill the AppView with historical commit data from all repos. Expected to take about 3 days as of May 31 2025.
+3. `bun backfill` — will backfill the AppView with historical commit data from all repos. Expected to take about 3 days as of July 23 2025.
    - Requires: `BSKY_DB_POSTGRES_URL`, `BSKY_DB_POSTGRES_SCHEMA`, `BSKY_DID_PLC_URL`, (optional) `FALLBACK_PLC_URL`, (optional) `OPENSEARCH_URL`, (optional) `OPENSEARCH_USERNAME`, (optional) `OPENSEARCH_PASSWORD`
    - Recommended to run with `pm2` or `forever` to ensure it runs in the background.
 4. `bun create-indexes` — will recreate the indexes in the AppView database.
