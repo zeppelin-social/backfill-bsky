@@ -28,8 +28,13 @@ import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline/promises";
 import { IndexingService } from "../backfill/indexingService";
+import {
+	POST_INDEX,
+	type PostDoc,
+	PROFILE_INDEX,
+	type ProfileDoc,
+} from "../backfill/workers/opensearch";
 import { jsonToLex, writeWorkerAllocations } from "../backfill/workers/writeCollection";
-import { POST_INDEX, type PostDoc, PROFILE_INDEX, type ProfileDoc } from "../backfill/workers/opensearch";
 
 declare global {
 	namespace NodeJS {
@@ -492,10 +497,16 @@ async function retryFailedWrites(db: Database) {
 
 	const failedActorDids = fs.readFileSync("./failed-actors.jsonl", "utf8").split("\n").flatMap((
 		s,
-	) => s.split(","));
-	const failedSearchDocs = fs.readFileSync("./failed-search.jsonl", "utf8").split("\n").map((s) =>
-		JSON.parse(s) as PostDoc | ProfileDoc
-	);
+	) => s.split(",")).filter((d) => d.startsWith("did:plc:") || d.startsWith("did:web:"));
+	const failedSearchDocs = fs.readFileSync("./failed-search.jsonl", "utf8").split("\n").map(
+		(s) => {
+			try {
+				return JSON.parse(s) as PostDoc | ProfileDoc;
+			} catch (e) {
+				console.error(`Failed to parse failed-search.jsonl line ${s}`);
+			}
+		},
+	).filter((s) => !!s);
 
 	const actorsPromise = (async () => {
 		for (const chunk of chunkArray(failedActorDids, 100)) {
@@ -527,12 +538,18 @@ async function retryFailedWrites(db: Database) {
 		const rl = readline.createInterface({ input: fstream, crlfDelay: Infinity });
 
 		for await (const line of rl) {
-			const msg = JSON.parse(line) as {
-				uri: string;
-				cid: string;
-				timestamp: string;
-				obj: Record<string, unknown>;
-			};
+			let msg;
+			try {
+				msg = JSON.parse(line) as {
+					uri: string;
+					cid: string;
+					timestamp: string;
+					obj: Record<string, unknown>;
+				};
+			} catch (e) {
+				console.error(`Failed to parse failed-records.jsonl line ${line}`);
+				continue;
+			}
 
 			try {
 				if (
@@ -558,12 +575,18 @@ async function retryFailedWrites(db: Database) {
 		const rl = readline.createInterface({ input: fstream, crlfDelay: Infinity });
 
 		for await (const line of rl) {
-			const msg = JSON.parse(line) as {
-				uri: string;
-				cid: string;
-				timestamp: string;
-				obj: Record<string, unknown>;
-			};
+			let msg;
+			try {
+				msg = JSON.parse(line) as {
+					uri: string;
+					cid: string;
+					timestamp: string;
+					obj: Record<string, unknown>;
+				};
+			} catch (e) {
+				console.error(`Failed to parse failed-${collection}.jsonl line ${line}`);
+				continue;
+			}
 
 			try {
 				if (
