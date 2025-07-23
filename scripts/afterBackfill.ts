@@ -3,6 +3,7 @@ import { IdResolver, MemoryCache } from "@atproto/identity";
 import { jsonStringToLex } from "@atproto/lexicon";
 import { WriteOpAction } from "@atproto/repo";
 import { AtUri } from "@atproto/syntax";
+import { Client as OpenSearchClient } from "@opensearch-project/opensearch";
 import { BackgroundQueue, Database } from "@zeppelin-social/bsky-backfill";
 import type {
 	DatabaseSchema,
@@ -26,10 +27,9 @@ import { CID } from "multiformats/cid";
 import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline/promises";
-import { Client as OpenSearchClient } from "@opensearch-project/opensearch";
 import { IndexingService } from "../backfill/indexingService";
 import { jsonToLex, writeWorkerAllocations } from "../backfill/workers/writeCollection";
-import { POST_INDEX, PROFILE_INDEX, type PostDoc, type ProfileDoc } from "./workers/opensearch";
+import { POST_INDEX, type PostDoc, PROFILE_INDEX, type ProfileDoc } from "../backfill/workers/opensearch";
 
 declare global {
 	namespace NodeJS {
@@ -490,28 +490,41 @@ async function retryFailedWrites(db: Database) {
 
 	const collections = writeWorkerAllocations.flat();
 
-	const failedActorDids = fs.readFileSync("./failed-actors.jsonl", "utf8").split("\n").flatMap(s => s.split(","));
-	const failedSearchDocs = fs.readFileSync("./failed-search.jsonl", "utf8").split("\n").map(s => JSON.parse(s) as PostDoc | ProfileDoc);
+	const failedActorDids = fs.readFileSync("./failed-actors.jsonl", "utf8").split("\n").flatMap((
+		s,
+	) => s.split(","));
+	const failedSearchDocs = fs.readFileSync("./failed-search.jsonl", "utf8").split("\n").map((s) =>
+		JSON.parse(s) as PostDoc | ProfileDoc
+	);
 
-	const actorPromises = failedActorDids.map(async (did) => {
-		await indexingSvc.indexHandle(did, new Date().toISOString())
-	});
-
-	const searchPromises = failedSearchDocs.map(async (doc) => {
-		const isPost = "record_rkey" in doc;
-		try {
-			await osClient.index({ index: isPost ? POST_INDEX : PROFILE_INDEX, body: doc })
-		} catch (e) {
-			console.warn(`Skipping search doc ${doc.did} ${isPost ? doc.record_rkey : "profile"}, ${e}`);
+	const actorsPromise = (async () => {
+		for (const chunk of chunkArray(failedActorDids, 100)) {
+			await Promise.all(chunk.map(async (did) => {
+				await indexingSvc.indexHandle(did, new Date().toISOString());
+			}));
 		}
-	});
+	})();
+
+	const searchesPromise = (async () => {
+		for (const chunk of chunkArray(failedSearchDocs, 100)) {
+			await Promise.all(chunk.map(async (doc) => {
+				const isPost = "record_rkey" in doc;
+				try {
+					await osClient.index({ index: isPost ? POST_INDEX : PROFILE_INDEX, body: doc });
+				} catch (e) {
+					console.warn(
+						`Skipping search doc ${doc.did} ${
+							isPost ? doc.record_rkey : "profile"
+						}, ${e}`,
+					);
+				}
+			}));
+		}
+	})();
 
 	const recordsPromise = (async () => {
 		const fstream = fs.createReadStream("./failed-records.jsonl");
-		const rl = readline.createInterface({
-			input: fstream,
-			crlfDelay: Infinity,
-		});
+		const rl = readline.createInterface({ input: fstream, crlfDelay: Infinity });
 
 		for await (const line of rl) {
 			const msg = JSON.parse(line) as {
@@ -542,10 +555,7 @@ async function retryFailedWrites(db: Database) {
 
 	const collectionPromises = collections.map(async (collection) => {
 		const fstream = fs.createReadStream(`./failed-${collection}.jsonl`);
-		const rl = readline.createInterface({
-			input: fstream,
-			crlfDelay: Infinity,
-		});
+		const rl = readline.createInterface({ input: fstream, crlfDelay: Infinity });
 
 		for await (const line of rl) {
 			const msg = JSON.parse(line) as {
@@ -574,12 +584,7 @@ async function retryFailedWrites(db: Database) {
 		}
 	});
 
-	await Promise.all([
-		...actorPromises,
-		...searchPromises,
-		...collectionPromises,
-		recordsPromise
-	]);
+	await Promise.all([actorsPromise, searchesPromise, ...collectionPromises, recordsPromise]);
 
 	console.log("Done reindexing failed records");
 }
@@ -708,4 +713,12 @@ function loadState(): State {
 
 function saveState(updateState: (state: State) => State) {
 	fs.writeFileSync(statePath, JSON.stringify(updateState(state), null, 2));
+}
+
+function chunkArray<T>(arr: T[], chunkSize: number): T[][] {
+	const chunks: T[][] = [];
+	for (let i = 0; i < arr.length; i += chunkSize) {
+		chunks.push(arr.slice(i, i + chunkSize));
+	}
+	return chunks;
 }

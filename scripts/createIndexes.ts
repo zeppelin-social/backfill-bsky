@@ -7,5 +7,7 @@ const db = new Database({
 	poolSize: 50,
 });
 
-const createCmds = readFileSync("create.sql", "utf-8").split("\n").map(cmd => `SET statement_timeout = 0; ${cmd}`);
-await Promise.allSettled(createCmds.map(cmd => db.pool.query(cmd)));
+const createCmds = readFileSync("create.sql", "utf-8").split("\n").map((cmd) =>
+	`SET statement_timeout = 0; ${cmd}`
+);
+await Promise.allSettled(createCmds.map((cmd) => db.pool.query(cmd)));
