@@ -23,11 +23,13 @@ import type { Record as GateRecord } from "@zeppelin-social/bsky-backfill/dist/l
 import { postUriToThreadgateUri, uriToDid } from "@zeppelin-social/bsky-backfill/dist/util/uris";
 import { parsePostgate } from "@zeppelin-social/bsky-backfill/dist/views/util";
 import { sql } from "kysely";
+import { LRUCache } from "lru-cache";
 import { CID } from "multiformats/cid";
 import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline/promises";
 import { IndexingService } from "../backfill/indexingService";
+import { is } from "../backfill/util/lexicons";
 import {
 	POST_INDEX,
 	type PostDoc,
@@ -35,7 +37,6 @@ import {
 	type ProfileDoc,
 } from "../backfill/workers/opensearch";
 import { jsonToLex, writeWorkerAllocations } from "../backfill/workers/writeCollection";
-import { is } from "../backfill/util/lexicons";
 
 declare global {
 	namespace NodeJS {
@@ -534,6 +535,8 @@ async function retryFailedWrites(db: Database) {
 		}
 	})();
 
+	const seenUris = new LRUCache<string, boolean>({ max: 10_000_000 });
+
 	const recordsPromise = (async () => {
 		const fstream = fs.createReadStream("./failed-records.jsonl");
 		const rl = readline.createInterface({ input: fstream, crlfDelay: Infinity });
@@ -551,6 +554,8 @@ async function retryFailedWrites(db: Database) {
 				console.error(`Failed to parse failed-records.jsonl line ${line}`);
 				continue;
 			}
+
+			if (seenUris.has(msg.uri)) continue;
 
 			try {
 				if (
@@ -571,6 +576,8 @@ async function retryFailedWrites(db: Database) {
 					msg.timestamp,
 					{ disableNotifs: true, skipValidation: true },
 				);
+
+				seenUris.set(msg.uri, true);
 			} catch (e) {
 				console.warn(`Skipping record ${msg.uri}, ${e}`);
 			}
@@ -595,19 +602,29 @@ async function retryFailedWrites(db: Database) {
 				continue;
 			}
 
+			if (seenUris.has(msg.uri)) continue;
+
 			try {
 				if (
 					!isCanonicalResourceUri(msg.uri) || !isCid(msg.cid)
 					|| isNaN(new Date(msg.timestamp).getTime())
 				) continue;
+
+				const atUri = new AtUri(msg.uri);
+				if (!is(atUri.collection, msg.obj)) {
+					throw new Error(`Record ${msg.uri} failed lexicon validation`);
+				}
+
 				await indexingSvc.indexRecord(
-					new AtUri(msg.uri),
+					atUri,
 					CID.parse(msg.cid),
 					jsonToLex(msg.obj),
 					WriteOpAction.Create,
 					msg.timestamp,
-					{ disableNotifs: true },
+					{ disableNotifs: true, skipValidation: true },
 				);
+
+				seenUris.set(msg.uri, true);
 			} catch (e) {
 				console.warn(`Skipping record ${msg.uri}, ${e}`);
 			}
