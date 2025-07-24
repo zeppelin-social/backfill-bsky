@@ -534,13 +534,19 @@ async function retryFailedWrites(db: Database) {
 		}
 	})();
 
-	const seenUris = new LRUCache<string, boolean>({ max: 10_000_000 });
+	const seenUris = new LRUCache<string, boolean>({ max: 5_000_000 });
+
+	let recordsPosition = fs.existsSync("./failed-records.pos")
+		? parseInt(fs.readFileSync("./failed-records.pos", "utf8"))
+		: 0;
+	let collectionPositions: Record<string, number> = {};
 
 	const recordsPromise = (async () => {
 		const fstream = fs.createReadStream("./failed-records.jsonl");
 		const rl = readline.createInterface({ input: fstream, crlfDelay: Infinity });
 
 		for await (const line of rl) {
+			recordsPosition++;
 			let msg;
 			try {
 				msg = JSON.parse(line) as {
@@ -582,7 +588,12 @@ async function retryFailedWrites(db: Database) {
 		const fstream = fs.createReadStream(`./failed-${collection}.jsonl`);
 		const rl = readline.createInterface({ input: fstream, crlfDelay: Infinity });
 
+		collectionPositions[collection] = fs.existsSync(`./failed-${collection}.pos`)
+			? parseInt(fs.readFileSync(`./failed-${collection}.pos`, "utf8"))
+			: 0;
+
 		for await (const line of rl) {
+			collectionPositions[collection]++;
 			let msg;
 			try {
 				msg = JSON.parse(line) as {
@@ -615,12 +626,25 @@ async function retryFailedWrites(db: Database) {
 
 				seenUris.set(msg.uri, true);
 			} catch (e) {
-				console.warn(`Skipping record ${msg.uri}, ${e}`);
+				console.warn(`Skipping record ${msg.uri} for ${collection}, ${e}`);
 			}
 		}
 	});
 
+	const onBeforeExit = () => {
+		fs.writeFileSync("./failed-records.pos", `${recordsPosition}`);
+		collections.forEach((c) =>
+			fs.writeFileSync(`./failed-${c}.pos`, `${collectionPositions[c]}`)
+		);
+	};
+
+	process.on("beforeExit", onBeforeExit);
+	process.on("exit", onBeforeExit);
+
 	await Promise.all([actorsPromise, searchesPromise, ...collectionPromises, recordsPromise]);
+
+	process.off("beforeExit", onBeforeExit);
+	process.off("exit", onBeforeExit);
 
 	console.log("Done reindexing failed records");
 }
