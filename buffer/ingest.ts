@@ -80,6 +80,7 @@ class FromBufferSubscription extends FirehoseSubscription {
 						}%) - ${sub.position}/~${lineCount} [${sub.info.workerNodes} workers; ${sub.info.queuedTasks} queued; ${sub.info.executingTasks} executing]`,
 					);
 					lastLog = Date.now();
+					messagesProcessed = messagesSent = 0;
 				}
 				setTimeout(logPosition, 30_000);
 			}, 30_000);
