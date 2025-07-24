@@ -131,8 +131,8 @@ class FromBufferSubscription extends FirehoseSubscription {
 	override onMessage = async (line: string): Promise<void> => {
 		try {
 			messagesSent++;
-			// @ts-expect-error — should make pool type generic
-			const res = await this.pool.execute({ line });
+			// @ts-expect-error — passing in "incorrect" worker input; our worker accepts it
+			const res = await this.execute({ line });
 			this.onProcessed(res);
 			messagesProcessed++;
 		} catch (e) {
