@@ -58,6 +58,8 @@ class FromBufferSubscription extends FirehoseSubscription {
 
 	override async start() {
 		try {
+			super.start();
+
 			const lineCount = await this.estimateLineCount(this.filename);
 			console.log(`estimated ${lineCount} lines in ${this.filename}`);
 
@@ -139,6 +141,8 @@ class FromBufferSubscription extends FirehoseSubscription {
 			this.subOpts.onError?.(new FirehoseSubscriptionError(e));
 		}
 	};
+
+	override initFirehose = () => {};
 
 	async flush() {
 		console.time("flushing queue");
