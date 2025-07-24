@@ -585,6 +585,7 @@ async function retryFailedWrites(db: Database) {
 	})();
 
 	const collectionPromises = collections.map(async (collection) => {
+		if (!fs.existsSync(`./failed-${collection}.jsonl`)) return;
 		const fstream = fs.createReadStream(`./failed-${collection}.jsonl`);
 		const rl = readline.createInterface({ input: fstream, crlfDelay: Infinity });
 
