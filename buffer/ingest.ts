@@ -32,7 +32,7 @@ if (process.argv.join(" ").includes("--file-state")) {
 }
 
 // maximum number of messages to read per second
-let maxPerSecond = 6_000;
+let maxPerSecond = 3_000;
 if (process.argv.join(" ").includes("--max-per-second")) {
 	maxPerSecond = parseInt(
 		process.argv[process.argv.indexOf("--max-per-second") + 1].replaceAll(/[^0-9]/g, ""),
@@ -224,7 +224,6 @@ async function main() {
 
 	const indexer = new FromBufferSubscription(file, startPosition, {
 		service: "",
-		statsFrequencyMs: 60_000,
 		maxConcurrency: 100,
 		idResolverOptions: { plcUrl: process.env.BSKY_DID_PLC_URL },
 		dbOptions: {
