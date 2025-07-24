@@ -1,6 +1,6 @@
 import { isCanonicalResourceUri, isCid } from "@atcute/lexicons/syntax";
 import { IdResolver, MemoryCache } from "@atproto/identity";
-import { jsonStringToLex } from "@atproto/lexicon";
+import { jsonStringToLex, jsonToLex } from "@atproto/lexicon";
 import { WriteOpAction } from "@atproto/repo";
 import { AtUri } from "@atproto/syntax";
 import { Client as OpenSearchClient } from "@opensearch-project/opensearch";
@@ -29,14 +29,13 @@ import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline/promises";
 import { IndexingService } from "../backfill/indexingService";
-import { is } from "../backfill/util/lexicons";
 import {
 	POST_INDEX,
 	type PostDoc,
 	PROFILE_INDEX,
 	type ProfileDoc,
 } from "../backfill/workers/opensearch";
-import { jsonToLex, writeWorkerAllocations } from "../backfill/workers/writeCollection";
+import { writeWorkerAllocations } from "../backfill/workers/writeCollection";
 
 declare global {
 	namespace NodeJS {
@@ -563,13 +562,8 @@ async function retryFailedWrites(db: Database) {
 					|| isNaN(new Date(msg.timestamp).getTime())
 				) continue;
 
-				const atUri = new AtUri(msg.uri);
-				if (!is(atUri.collection, msg.obj)) {
-					throw new Error(`Record ${msg.uri} failed lexicon validation`);
-				}
-
 				await indexingSvc.indexRecord(
-					atUri,
+					new AtUri(msg.uri),
 					CID.parse(msg.cid),
 					jsonToLex(msg.obj),
 					WriteOpAction.Create,
@@ -610,13 +604,8 @@ async function retryFailedWrites(db: Database) {
 					|| isNaN(new Date(msg.timestamp).getTime())
 				) continue;
 
-				const atUri = new AtUri(msg.uri);
-				if (!is(atUri.collection, msg.obj)) {
-					throw new Error(`Record ${msg.uri} failed lexicon validation`);
-				}
-
 				await indexingSvc.indexRecord(
-					atUri,
+					new AtUri(msg.uri),
 					CID.parse(msg.cid),
 					jsonToLex(msg.obj),
 					WriteOpAction.Create,
