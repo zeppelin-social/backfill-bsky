@@ -556,7 +556,7 @@ async function retryFailedWrites(db: Database) {
 					obj: Record<string, unknown>;
 				};
 			} catch (e) {
-				console.error(`Failed to parse failed-records.jsonl line ${line}`);
+				console.error(`Failed to parse failed-records.jsonl line ${recordsPosition}`);
 				continue;
 			}
 
@@ -579,7 +579,7 @@ async function retryFailedWrites(db: Database) {
 
 				seenUris.set(msg.uri, true);
 			} catch (e) {
-				console.warn(`Skipping record ${msg.uri}, ${e}`);
+				console.warn(`Skipping record ${msg.uri} on line ${recordsPosition}, ${e}`);
 			}
 		}
 	})();
@@ -603,7 +603,11 @@ async function retryFailedWrites(db: Database) {
 					obj: Record<string, unknown>;
 				};
 			} catch (e) {
-				console.error(`Failed to parse failed-${collection}.jsonl line ${line}`);
+				console.error(
+					`Failed to parse failed-${collection}.jsonl line ${
+						collectionPositions[collection]
+					}`,
+				);
 				continue;
 			}
 
@@ -626,7 +630,11 @@ async function retryFailedWrites(db: Database) {
 
 				seenUris.set(msg.uri, true);
 			} catch (e) {
-				console.warn(`Skipping record ${msg.uri} for ${collection}, ${e}`);
+				console.warn(
+					`Skipping record ${msg.uri} for ${collection} on line ${
+						collectionPositions[collection]
+					}, ${e}`,
+				);
 			}
 		}
 	});
