@@ -224,6 +224,7 @@ async function main() {
 
 	const indexer = new FromBufferSubscription(file, startPosition, {
 		service: "",
+		statsFrequencyMs: 0,
 		maxConcurrency: 100,
 		idResolverOptions: { plcUrl: process.env.BSKY_DID_PLC_URL },
 		dbOptions: {
