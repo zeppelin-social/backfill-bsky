@@ -1,7 +1,6 @@
 import { isCanonicalResourceUri, isCid } from "@atcute/lexicons/syntax";
 import { IdResolver, MemoryCache } from "@atproto/identity";
 import { jsonStringToLex, jsonToLex } from "@atproto/lexicon";
-import { WriteOpAction } from "@atproto/repo";
 import { AtUri } from "@atproto/syntax";
 import { Client as OpenSearchClient } from "@opensearch-project/opensearch";
 import { BackgroundQueue, Database } from "@zeppelin-social/bsky-backfill";
@@ -35,7 +34,7 @@ import {
 	PROFILE_INDEX,
 	type ProfileDoc,
 } from "../backfill/workers/opensearch";
-import { writeWorkerAllocations } from "../backfill/workers/writeCollection";
+import { type ToInsertCommit, writeWorkerAllocations } from "../backfill/workers/writeCollection";
 
 declare global {
 	namespace NodeJS {
@@ -59,6 +58,8 @@ let state: State = {
 };
 
 const POOL_SIZE = 100;
+
+const RECORDS_BATCH_SIZE = 20_000;
 
 // const DB_SETTINGS = {
 // 	max_parallel_workers: 24,
@@ -558,6 +559,8 @@ async function retryFailedWrites(db: Database) {
 		const fstream = fs.createReadStream("./failed-records.jsonl");
 		const rl = readline.createInterface({ input: fstream, crlfDelay: Infinity });
 
+		let batch: ToInsertCommit[] = [];
+
 		for await (const line of rl) {
 			recordsPosition++;
 			if (recordsPosition < recordsStartingPosition) continue;
@@ -583,16 +586,21 @@ async function retryFailedWrites(db: Database) {
 					|| isNaN(new Date(msg.timestamp).getTime())
 				) continue;
 
-				await indexingSvc.indexRecord(
-					new AtUri(msg.uri),
-					CID.parse(msg.cid),
-					jsonToLex(msg.obj),
-					WriteOpAction.Create,
-					msg.timestamp,
-					{ disableNotifs: true, skipValidation: true },
-				);
-
+				batch.push({
+					uri: new AtUri(msg.uri),
+					cid: CID.parse(msg.cid),
+					timestamp: msg.timestamp,
+					obj: jsonToLex(msg.obj),
+				});
 				seenUris.set(msg.uri, true);
+
+				if (batch.length >= RECORDS_BATCH_SIZE) {
+					console.time(`bulk indexing to records ${batch.length} records`);
+					await indexingSvc.bulkIndexToRecordTable(batch);
+					console.timeEnd(`bulk indexing to records ${batch.length} records`);
+
+					batch = [];
+				}
 			} catch (e) {
 				console.warn(`Skipping record ${msg.uri} on line ${recordsPosition}, ${e}`);
 				if (`${e}`.includes("Out of memory")) exit();
@@ -610,6 +618,7 @@ async function retryFailedWrites(db: Database) {
 			: 0;
 
 		collectionPositions[collection] = 0;
+		let batch: ToInsertCommit[] = [];
 
 		for await (const line of rl) {
 			collectionPositions[collection]++;
@@ -640,16 +649,28 @@ async function retryFailedWrites(db: Database) {
 					|| isNaN(new Date(msg.timestamp).getTime())
 				) continue;
 
-				await indexingSvc.indexRecord(
-					new AtUri(msg.uri),
-					CID.parse(msg.cid),
-					jsonToLex(msg.obj),
-					WriteOpAction.Create,
-					msg.timestamp,
-					{ disableNotifs: true, skipValidation: true },
-				);
-
+				batch.push({
+					uri: new AtUri(msg.uri),
+					cid: CID.parse(msg.cid),
+					timestamp: msg.timestamp,
+					obj: jsonToLex(msg.obj),
+				});
 				seenUris.set(msg.uri, true);
+
+				if (batch.length >= RECORDS_BATCH_SIZE) {
+					console.time(
+						`bulk indexing to collection ${collection} ${batch.length} records`,
+					);
+					await indexingSvc.bulkIndexToCollectionSpecificTables(
+						new Map([[collection, batch]]),
+						{ validate: false }, // backfill already did this when parsing repo
+					);
+					console.timeEnd(
+						`bulk indexing to collection ${collection} ${batch.length} records`,
+					);
+
+					batch = [];
+				}
 			} catch (e) {
 				console.warn(
 					`Skipping record ${msg.uri} for ${collection} on line ${
