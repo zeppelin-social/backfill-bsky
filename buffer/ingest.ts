@@ -126,20 +126,22 @@ async function main() {
 		const allRecords = [...collectionBuffer.values()].flat();
 
 		try {
-			const str = `Flushing ${bufferSize} records`;
-			console.time(str);
+			const timeRecords = `Flushing ${bufferSize} records to record table`;
+			const timeCollections = `Flushing ${bufferSize} records to collection tables`;
+			console.time(timeRecords);
+			console.time(timeCollections);
 			console.time("Flushing other events");
 			await Promise.all([
 				Promise.all([
 					idxSvc.bulkIndexToRecordTable(allRecords).catch((e) =>
 						console.error("Error bulk indexing to record table", e)
-					),
+					).finally(() => console.timeEnd(timeRecords)),
 					idxSvc.bulkIndexToCollectionSpecificTables(collectionBuffer, {
 						validate: false,
 					}).catch((e) =>
 						console.error("Error bulk indexing to collection specific tables", e)
-					),
-				]).finally(() => console.timeEnd(str)),
+					).finally(() => console.timeEnd(timeCollections)),
+				]),
 				otherEvts.onSizeLessThan(100).catch((e) =>
 					console.error("Error flushing other events", e)
 				).finally(() => console.timeEnd("Flushing other events")), // Just want to prevent it from getting too big
