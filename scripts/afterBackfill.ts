@@ -60,7 +60,7 @@ let state: State = {
 
 const POOL_SIZE = 100;
 
-const RECORDS_BATCH_SIZE = 20_000;
+const RECORDS_BATCH_SIZE = 50_000;
 
 // const DB_SETTINGS = {
 // 	max_parallel_workers: 24,
