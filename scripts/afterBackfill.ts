@@ -565,44 +565,43 @@ async function retryFailedWrites(db: Database) {
 		for await (const line of rl) {
 			recordsPosition++;
 			if (recordsPosition < recordsStartingPosition) continue;
-			let msg;
 			try {
-				msg = JSON.parse(line) as {
+				const msg = JSON.parse(line) as {
 					uri: string;
 					cid: string;
 					timestamp: string;
 					obj: Record<string, unknown>;
 				};
+
+				if (seenUris.has(msg.uri)) continue;
+
+				if (
+					!isCanonicalResourceUri(msg.uri) || !isCid(msg.cid)
+					|| isNaN(new Date(msg.timestamp).getTime())
+				) {
+					console.log(`Skipping invalid record message ${JSON.stringify(msg)}`);
+					continue;
+				}
+
+				const uri = new AtUri(msg.uri);
+				fixCids(msg.obj);
+				if (!is(uri.collection, msg.obj)) {
+					console.log(`Skipping invalid record ${JSON.stringify(msg.obj)}`);
+					continue;
+				}
+
+				batch.push({
+					uri,
+					cid: CID.parse(msg.cid),
+					timestamp: msg.timestamp,
+					obj: jsonToLex(msg.obj),
+				});
+				seenUris.set(msg.uri, true);
 			} catch (e) {
 				console.error(`Failed to parse failed-records.jsonl line ${recordsPosition}`);
 				if (`${e}`.includes("Out of memory")) exit();
 				continue;
 			}
-
-			if (seenUris.has(msg.uri)) continue;
-
-			if (
-				!isCanonicalResourceUri(msg.uri) || !isCid(msg.cid)
-				|| isNaN(new Date(msg.timestamp).getTime())
-			) {
-				console.log(`Skipping invalid record message ${JSON.stringify(msg)}`);
-				continue;
-			}
-
-			const uri = new AtUri(msg.uri);
-			fixCids(msg.obj);
-			if (!is(uri.collection, msg.obj)) {
-				console.log(`Skipping invalid record ${JSON.stringify(msg.obj)}`);
-				continue;
-			}
-
-			batch.push({
-				uri,
-				cid: CID.parse(msg.cid),
-				timestamp: msg.timestamp,
-				obj: jsonToLex(msg.obj),
-			});
-			seenUris.set(msg.uri, true);
 
 			if (batch.length >= RECORDS_BATCH_SIZE) {
 				try {
@@ -639,14 +638,35 @@ async function retryFailedWrites(db: Database) {
 		for await (const line of rl) {
 			collectionPositions[collection]++;
 			if (collectionPositions[collection] < startingPosition) continue;
-			let msg;
 			try {
-				msg = JSON.parse(line) as {
+				const msg = JSON.parse(line) as {
 					uri: string;
 					cid: string;
 					timestamp: string;
 					obj: Record<string, unknown>;
 				};
+
+				if (seenUris.has(msg.uri)) continue;
+
+				if (
+					!isCanonicalResourceUri(msg.uri) || !isCid(msg.cid)
+					|| isNaN(new Date(msg.timestamp).getTime())
+				) continue;
+
+				const uri = new AtUri(msg.uri);
+				fixCids(msg.obj);
+				if (!is(uri.collection, msg.obj)) {
+					console.log(`Skipping invalid record ${JSON.stringify(msg.obj)}`);
+					continue;
+				}
+
+				batch.push({
+					uri,
+					cid: CID.parse(msg.cid),
+					timestamp: msg.timestamp,
+					obj: jsonToLex(msg.obj),
+				});
+				seenUris.set(msg.uri, true);
 			} catch (e) {
 				console.error(
 					`Failed to parse failed-${collection}.jsonl line ${
@@ -656,28 +676,6 @@ async function retryFailedWrites(db: Database) {
 				if (`${e}`.includes("Out of memory")) exit();
 				continue;
 			}
-
-			if (seenUris.has(msg.uri)) continue;
-
-			if (
-				!isCanonicalResourceUri(msg.uri) || !isCid(msg.cid)
-				|| isNaN(new Date(msg.timestamp).getTime())
-			) continue;
-
-			const uri = new AtUri(msg.uri);
-			fixCids(msg.obj);
-			if (!is(uri.collection, msg.obj)) {
-				console.log(`Skipping invalid record ${JSON.stringify(msg.obj)}`);
-				continue;
-			}
-
-			batch.push({
-				uri,
-				cid: CID.parse(msg.cid),
-				timestamp: msg.timestamp,
-				obj: jsonToLex(msg.obj),
-			});
-			seenUris.set(msg.uri, true);
 
 			if (batch.length >= RECORDS_BATCH_SIZE) {
 				try {
