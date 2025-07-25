@@ -587,7 +587,10 @@ async function retryFailedWrites(db: Database) {
 			) continue;
 
 			const uri = new AtUri(msg.uri);
-			if (!is(uri.collection, msg.obj)) continue;
+			if (!is(uri.collection, msg.obj)) {
+				console.log(`Skipping invalid record ${JSON.stringify(msg.obj)}`);
+				continue;
+			};
 
 			batch.push({
 				uri,
@@ -659,7 +662,10 @@ async function retryFailedWrites(db: Database) {
 				) continue;
 
 				const uri = new AtUri(msg.uri);
-				if (!is(uri.collection, msg.obj)) continue;
+				if (!is(uri.collection, msg.obj)) {
+					console.log(`Skipping invalid record ${JSON.stringify(msg.obj)}`);
+					continue;
+				};
 
 				batch.push({
 					uri,
