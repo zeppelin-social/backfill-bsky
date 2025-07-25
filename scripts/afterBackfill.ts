@@ -509,6 +509,18 @@ async function retryFailedWrites(db: Database) {
 		},
 	).filter((s) => !!s);
 
+	const onBeforeExit = () => {
+		fs.writeFileSync("./failed-records.pos", `${recordsPosition}`);
+		collections.forEach((c) =>
+			fs.writeFileSync(`./failed-${c}.pos`, `${collectionPositions[c]}`)
+		);
+	};
+
+	const exit = () => {
+		onBeforeExit();
+		process.exit(1);
+	};
+
 	const actorsPromise = (async () => {
 		for (const chunk of chunkArray(failedActorDids, 100)) {
 			await Promise.all(chunk.map(async (did) => {
@@ -557,7 +569,7 @@ async function retryFailedWrites(db: Database) {
 				};
 			} catch (e) {
 				console.error(`Failed to parse failed-records.jsonl line ${recordsPosition}`);
-				if (`${e}`.includes("Out of memory")) process.exit(1);
+				if (`${e}`.includes("Out of memory")) exit();
 				continue;
 			}
 
@@ -581,7 +593,7 @@ async function retryFailedWrites(db: Database) {
 				seenUris.set(msg.uri, true);
 			} catch (e) {
 				console.warn(`Skipping record ${msg.uri} on line ${recordsPosition}, ${e}`);
-				if (`${e}`.includes("Out of memory")) process.exit(1);
+				if (`${e}`.includes("Out of memory")) exit();
 			}
 		}
 	})();
@@ -611,7 +623,7 @@ async function retryFailedWrites(db: Database) {
 						collectionPositions[collection]
 					}`,
 				);
-				if (`${e}`.includes("Out of memory")) process.exit(1);
+				if (`${e}`.includes("Out of memory")) exit();
 				continue;
 			}
 
@@ -639,17 +651,10 @@ async function retryFailedWrites(db: Database) {
 						collectionPositions[collection]
 					}, ${e}`,
 				);
-				if (`${e}`.includes("Out of memory")) process.exit(1);
+				if (`${e}`.includes("Out of memory")) exit();
 			}
 		}
 	});
-
-	const onBeforeExit = () => {
-		fs.writeFileSync("./failed-records.pos", `${recordsPosition}`);
-		collections.forEach((c) =>
-			fs.writeFileSync(`./failed-${c}.pos`, `${collectionPositions[c]}`)
-		);
-	};
 
 	process.on("beforeExit", onBeforeExit);
 	process.on("exit", onBeforeExit);
