@@ -4,6 +4,7 @@
 		"@atcute/atproto": "npm:@atcute/atproto@^3.1.1",
 		"@atcute/car": "npm:@atcute/car@^3.0.3",
 		"@atcute/cbor": "npm:@atcute/cbor@^2.2.3",
+		"@atcute/tid": "npm:@atcute/tid@^1.0.2",
 		"@atproto/identity": "npm:@atproto/identity@^0.4.8",
 		"@atproto/lexicon": "npm:@atproto/lexicon@^0.4.11",
 		"@atproto/repo": "npm:@atproto/repo@^0.8.1",
@@ -14,7 +15,9 @@
 		"@std/streams": "jsr:@std/streams@^1.0.9",
 		"@types/node": "npm:@types/node@^22.15.19",
 		"@zeppelin-social/bsky": "npm:@zeppelin-social/bsky@^0.0.171",
+		"@zeppelin-social/bsky-backfill": "npm:@zeppelin-social/bsky-backfill@^0.0.174",
 		"multiformats": "npm:multiformats@9.9.0",
+		"p-queue": "npm:p-queue@^8.1.0",
 		"partysocket": "npm:partysocket@^1.1.4"
 	},
 	"unstable": ["worker-options"]
