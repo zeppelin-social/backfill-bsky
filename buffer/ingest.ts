@@ -15,7 +15,7 @@ import { IdResolver, IndexingService } from "../backfill/indexingService.ts";
 import { is } from "../backfill/util/lexicons.ts";
 import type { ToInsertCommit } from "../backfill/workers/writeCollection.ts";
 
-const BATCH_SIZE = 20_000;
+const BATCH_SIZE = 50_000;
 const LOG_INTERVAL_MS = 30_000;
 
 const useFileState = process.argv.includes("--file-state");
