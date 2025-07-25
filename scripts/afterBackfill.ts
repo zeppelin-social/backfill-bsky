@@ -557,6 +557,7 @@ async function retryFailedWrites(db: Database) {
 				};
 			} catch (e) {
 				console.error(`Failed to parse failed-records.jsonl line ${recordsPosition}`);
+				if (`${e}`.includes("Out of memory")) process.exit(1);
 				continue;
 			}
 
@@ -580,6 +581,7 @@ async function retryFailedWrites(db: Database) {
 				seenUris.set(msg.uri, true);
 			} catch (e) {
 				console.warn(`Skipping record ${msg.uri} on line ${recordsPosition}, ${e}`);
+				if (`${e}`.includes("Out of memory")) process.exit(1);
 			}
 		}
 	})();
@@ -609,6 +611,7 @@ async function retryFailedWrites(db: Database) {
 						collectionPositions[collection]
 					}`,
 				);
+				if (`${e}`.includes("Out of memory")) process.exit(1);
 				continue;
 			}
 
@@ -636,6 +639,7 @@ async function retryFailedWrites(db: Database) {
 						collectionPositions[collection]
 					}, ${e}`,
 				);
+				if (`${e}`.includes("Out of memory")) process.exit(1);
 			}
 		}
 	});
