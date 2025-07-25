@@ -32,7 +32,7 @@ if (process.argv.join(" ").includes("--file-state")) {
 }
 
 // maximum number of messages to read per second
-let maxPerSecond = 3_000;
+let maxPerSecond = 10_000;
 if (process.argv.join(" ").includes("--max-per-second")) {
 	maxPerSecond = parseInt(
 		process.argv[process.argv.indexOf("--max-per-second") + 1].replaceAll(/[^0-9]/g, ""),
@@ -233,6 +233,8 @@ async function main() {
 			schema: process.env.BSKY_DB_POSTGRES_SCHEMA,
 			poolSize: 200,
 		},
+		minWorkers: 32,
+		maxWorkers: 128,
 		onError: (err) => console.error(...(err.cause ? [err.message, err.cause] : [err])),
 	});
 
