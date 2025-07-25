@@ -604,7 +604,7 @@ async function retryFailedWrites(db: Database) {
 					);
 				}
 			} catch (e) {
-				console.warn(`Failed to index records: ${e}`);
+				console.error(`Failed to index records`, e);
 				if (`${e}`.includes("Out of memory")) exit();
 			} finally {
 				batch = [];
@@ -682,7 +682,7 @@ async function retryFailedWrites(db: Database) {
 				console.warn(
 					`Skipping records for ${collection} on line ${
 						collectionPositions[collection]
-					}: ${e}`,
+					}`, e
 				);
 				if (`${e}`.includes("Out of memory")) exit();
 			} finally {
