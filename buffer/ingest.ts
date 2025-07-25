@@ -12,6 +12,7 @@ import readline from "node:readline";
 import { setTimeout as sleep } from "node:timers/promises";
 import PQueue from "p-queue";
 import { IdResolver, IndexingService } from "../backfill/indexingService.ts";
+import { is } from "../backfill/util/lexicons.ts";
 import type { ToInsertCommit } from "../backfill/workers/writeCollection.ts";
 
 const BATCH_SIZE = 50_000;
@@ -68,8 +69,9 @@ async function main() {
 	let lineNo = 0;
 	let sinceLastLog = Date.now();
 
-	let recordBuffer: ToInsertCommit[] = [];
-	let collectionBuffer: CollectionMap = new Map();
+	const collectionBuffer: CollectionMap = new Map();
+	const getBufferSize = () => collectionBuffer.values().reduce((acc, arr) => acc + arr.length, 0);
+
 	const otherEvts = new PQueue({ concurrency: 20 });
 	otherEvts.on("error", console.error);
 
@@ -89,7 +91,7 @@ async function main() {
 
 		let evt;
 		try {
-			evt = jsonToLex(JSON.parse(line)) as Event;
+			evt = JSON.parse(line) as Event;
 		} catch {
 			console.warn(`Failed to parse JSON at line ${lineNo}`);
 			continue;
@@ -101,17 +103,14 @@ async function main() {
 			console.warn(`Failed to process event at line ${lineNo}`, err);
 		}
 
-		if (recordBuffer.length >= BATCH_SIZE) {
+		const bufferSize = getBufferSize();
+		if (bufferSize >= BATCH_SIZE) {
 			await flush(indexingSvc, lineNo);
-			collectionBuffer = new Map();
-			recordBuffer = [];
+			collectionBuffer.clear();
 		}
 
 		if (Date.now() - sinceLastLog > LOG_INTERVAL_MS) {
-			console.log(
-				`Processed ${lineNo.toLocaleString()} lines `
-					+ `(${recordBuffer.length.toLocaleString()} records buffered)`,
-			);
+			console.log(`Processed ${lineNo} lines (${bufferSize} records buffered)`);
 			sinceLastLog = Date.now();
 		}
 	}
@@ -121,48 +120,53 @@ async function main() {
 	process.exit(0);
 
 	async function flush(idxSvc: IndexingService, pos: number, final = false) {
-		if (recordBuffer.length === 0) return;
+		const bufferSize = getBufferSize();
+		if (bufferSize === 0) return;
 
-		const t0 = Date.now();
-		const collectionCount = [...collectionBuffer.values()].reduce(
-			(acc, arr) => acc + arr.length,
-			0,
-		);
+		const allRecords = [...collectionBuffer.values()].flat();
 
 		try {
+			const str = `Flushing ${bufferSize} records`;
+			console.time(str);
+			console.time("Flushing other events");
 			await Promise.all([
-				idxSvc.bulkIndexToRecordTable(recordBuffer),
-				idxSvc.bulkIndexToCollectionSpecificTables(collectionBuffer, { validate: false }),
-				otherEvts.onSizeLessThan(100), // Just want to prevent it from getting too big
+				Promise.all([
+					idxSvc.bulkIndexToRecordTable(allRecords).catch(console.error),
+					idxSvc.bulkIndexToCollectionSpecificTables(collectionBuffer, {
+						validate: false,
+					}).catch(console.error),
+				]).finally(() => console.timeEnd(str)),
+				otherEvts.onSizeLessThan(100).catch(console.error).finally(() =>
+					console.timeEnd("Flushing other events")
+				), // Just want to prevent it from getting too big
 			]);
-			const dt = ((Date.now() - t0) / 1000).toFixed(1);
-			console.log(
-				`Flushed ${recordBuffer.length.toLocaleString()} records (${collectionCount.toLocaleString()} collection rows) in ${dt}s`,
-			);
-			writeFileSync("relay-buffer.pos", `${pos}\n`);
 		} catch (err) {
 			console.error("Error flushing batch – writing to disk", err);
 			writeFileSync(
 				`failed-batch-${Date.now()}.jsonl`,
-				recordBuffer.map((r) => JSON.stringify({ uri: r.uri, obj: lexToJson(r.obj) })).join(
+				allRecords.map((r) => JSON.stringify({ uri: r.uri, obj: lexToJson(r.obj) })).join(
 					"\n",
 				) + "\n",
 			);
 			if (final) throw err;
+		} finally {
+			writeFileSync("relay-buffer.pos", `${pos}`);
 		}
 	}
 
 	function processEvent(evt: Event) {
 		if (evt.$type === "com.atproto.sync.subscribeRepos#identity") {
-			void otherEvts.add(() => indexingSvc.indexHandle(evt.did, evt.time, true));
+			void otherEvts.add(() => indexingSvc.indexHandle(evt.did, evt.time, true)).catch(
+				console.error,
+			);
 			return;
 		} else if (evt.$type === "com.atproto.sync.subscribeRepos#account") {
 			if (evt.active === false && evt.status === "deleted") {
-				void otherEvts.add(() => indexingSvc.deleteActor(evt.did));
+				void otherEvts.add(() => indexingSvc.deleteActor(evt.did)).catch(console.error);
 			} else {
 				void otherEvts.add(() =>
 					indexingSvc.updateActorStatus(evt.did, evt.active, evt.status)
-				);
+				).catch(console.error);
 			}
 			return;
 		} else if (evt.$type === "com.atproto.sync.subscribeRepos#sync") {
@@ -172,7 +176,7 @@ async function main() {
 					indexingSvc.setCommitLastSeen(evt.did, cid, evt.rev),
 					indexingSvc.indexHandle(evt.did, evt.time),
 				])
-			);
+			).catch(console.error);
 			return;
 		} else if (evt.$type !== "com.atproto.sync.subscribeRepos#commit") return;
 
@@ -182,24 +186,31 @@ async function main() {
 			const uri = AtUri.make(evt.did, ...op.path.split("/"));
 			if (op.action === "delete") {
 				void otherEvts.add(() => indexingSvc.deleteRecord(uri));
-			} else if (op.action === "update") {
-				void otherEvts.add(() =>
-					indexingSvc.indexRecord(
-						uri,
-						parseCid(op.cid),
-						op.record,
-						WriteOpAction.Update,
-						evt.time,
-					)
-				);
 			} else {
-				if (!collectionBuffer.has(uri.collection)) collectionBuffer.set(uri.collection, []);
-				collectionBuffer.get(uri.collection)!.push({
-					uri,
-					cid: parseCid(op.cid),
-					timestamp: evt.time,
-					obj: op.record,
-				});
+				const record = jsonToLex(op.record);
+				if (!is(uri.collection, record)) continue;
+				if (op.action === "update") {
+					void otherEvts.add(() =>
+						indexingSvc.indexRecord(
+							uri,
+							parseCid(op.cid),
+							record,
+							WriteOpAction.Update,
+							evt.time,
+							{ skipValidation: true },
+						)
+					).catch(console.error);
+				} else {
+					if (!collectionBuffer.has(uri.collection)) {
+						collectionBuffer.set(uri.collection, []);
+					}
+					collectionBuffer.get(uri.collection)!.push({
+						uri,
+						cid: parseCid(op.cid),
+						timestamp: evt.time,
+						obj: record,
+					});
+				}
 			}
 		}
 	}
