@@ -1,6 +1,6 @@
 import { isCanonicalResourceUri, isCid } from "@atcute/lexicons/syntax";
 import { IdResolver, MemoryCache } from "@atproto/identity";
-import { jsonStringToLex, jsonToLex } from "@atproto/lexicon";
+import { jsonStringToLex, jsonToLex, lexToJson } from "@atproto/lexicon";
 import { AtUri } from "@atproto/syntax";
 import { Client as OpenSearchClient } from "@opensearch-project/opensearch";
 import { BackgroundQueue, Database } from "@zeppelin-social/bsky-backfill";
@@ -580,30 +580,35 @@ async function retryFailedWrites(db: Database) {
 
 			if (seenUris.has(msg.uri)) continue;
 
+			if (
+				!isCanonicalResourceUri(msg.uri) || !isCid(msg.cid)
+				|| isNaN(new Date(msg.timestamp).getTime())
+			) continue;
+
+			batch.push({
+				uri: new AtUri(msg.uri),
+				cid: CID.parse(msg.cid),
+				timestamp: msg.timestamp,
+				obj: jsonToLex(msg.obj),
+			});
+			seenUris.set(msg.uri, true);
+
 			try {
-				if (
-					!isCanonicalResourceUri(msg.uri) || !isCid(msg.cid)
-					|| isNaN(new Date(msg.timestamp).getTime())
-				) continue;
-
-				batch.push({
-					uri: new AtUri(msg.uri),
-					cid: CID.parse(msg.cid),
-					timestamp: msg.timestamp,
-					obj: jsonToLex(msg.obj),
-				});
-				seenUris.set(msg.uri, true);
-
 				if (batch.length >= RECORDS_BATCH_SIZE) {
-					console.time(`bulk indexing to records ${batch.length} records`);
+					console.time(
+						`bulk indexing to records ${batch.length} records at line ${recordsPosition}`,
+					);
 					await indexingSvc.bulkIndexToRecordTable(batch);
-					console.timeEnd(`bulk indexing to records ${batch.length} records`);
-
-					batch = [];
+					console.timeEnd(
+						`bulk indexing to records ${batch.length} records at line ${recordsPosition}`,
+					);
 				}
 			} catch (e) {
-				console.warn(`Skipping record ${msg.uri} on line ${recordsPosition}, ${e}`);
+				console.warn(`Failed to index records: ${e}`);
 				if (`${e}`.includes("Out of memory")) exit();
+			} finally {
+				batch = [];
+				fs.writeFileSync(`./failed-records.pos`, `${recordsPosition}`);
 			}
 		}
 	})();
@@ -659,25 +664,29 @@ async function retryFailedWrites(db: Database) {
 
 				if (batch.length >= RECORDS_BATCH_SIZE) {
 					console.time(
-						`bulk indexing to collection ${collection} ${batch.length} records`,
+						`bulk indexing to collection ${collection} ${batch.length} records at line ${
+							collectionPositions[collection]
+						}`,
 					);
 					await indexingSvc.bulkIndexToCollectionSpecificTables(
 						new Map([[collection, batch]]),
 						{ validate: false }, // backfill already did this when parsing repo
 					);
 					console.timeEnd(
-						`bulk indexing to collection ${collection} ${batch.length} records`,
+						`bulk indexing to collection ${collection} ${batch.length} records at line ${
+							collectionPositions[collection]
+						}`,
 					);
-
-					batch = [];
 				}
 			} catch (e) {
 				console.warn(
-					`Skipping record ${msg.uri} for ${collection} on line ${
+					`Skipping records for ${collection} on line ${
 						collectionPositions[collection]
-					}, ${e}`,
+					}: ${e}`,
 				);
 				if (`${e}`.includes("Out of memory")) exit();
+			} finally {
+				batch = [];
 			}
 		}
 	});
