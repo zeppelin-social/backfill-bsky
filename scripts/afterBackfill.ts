@@ -584,10 +584,13 @@ async function retryFailedWrites(db: Database) {
 			if (
 				!isCanonicalResourceUri(msg.uri) || !isCid(msg.cid)
 				|| isNaN(new Date(msg.timestamp).getTime())
-			) continue;
+			) {
+				console.log(`Skipping invalid record message ${JSON.stringify(msg)}`);
+				continue;
+			}
 
 			const uri = new AtUri(msg.uri);
-			fixCids(uri.collection, msg.obj);
+			fixCids(msg.obj);
 			if (!is(uri.collection, msg.obj)) { // silly, don't ask
 				console.log(`Skipping invalid record ${JSON.stringify(msg.obj)}`);
 				continue;
@@ -663,7 +666,7 @@ async function retryFailedWrites(db: Database) {
 				) continue;
 
 				const uri = new AtUri(msg.uri);
-				fixCids(uri.collection, msg.obj);
+				fixCids(msg.obj);
 				if (!is(uri.collection, msg.obj)) { // silly, don't ask
 					console.log(`Skipping invalid record ${JSON.stringify(msg.obj)}`);
 					continue;
@@ -850,24 +853,14 @@ function chunkArray<T>(arr: T[], chunkSize: number): T[][] {
 	return chunks;
 }
 
-function fixCids(collection: string, obj: any) {
-	if (collection === "app.bsky.feed.post") {
-		if (obj.reply?.root?.cid?.$link) obj.reply.root.cid = obj.reply.root.cid.$link;
-		if (obj.reply?.parent?.cid?.$link) obj.reply.parent.cid = obj.reply.parent.cid.$link;
-		if (obj.embed?.record?.cid?.$link) obj.embed.record.cid = obj.embed.record.cid.$link;
-		if (obj.embed?.record?.record?.cid?.$link) {
-			obj.embed.record.record.cid = obj.embed.record.record.cid.$link;
+function fixCids(obj: any) {
+	if (typeof obj !== "object" || !obj) return;
+	if (obj.uri && obj.cid && obj.cid.$link && Object.keys(obj).length === 2) {
+		obj.cid = obj.cid.$link;
+	} else {
+		for (const key in obj) {
+			if (key === "$link") continue;
+			fixCids(obj[key]);
 		}
-	} else if (collection === "app.bsky.feed.like") {
-		if (obj.subject?.cid?.$link) obj.subject.cid = obj.subject.cid.$link;
-		if (obj.via?.cid?.$link) obj.via.cid = obj.via.cid.$link;
-	} else if (collection === "app.bsky.feed.repost") {
-		if (obj.subject?.cid?.$link) obj.subject.cid = obj.subject.cid.$link;
-		if (obj.via?.cid?.$link) obj.via.cid = obj.via.cid.$link;
-	} else if (collection === "app.bsky.actor.profle") {
-		if (obj.joinedViaStarterPack?.$link) {
-			obj.joinedViaStarterPack = obj.joinedViaStarterPack.$link;
-		}
-		if (obj.pinnedPost?.$link) obj.pinnedPost = obj.pinnedPost.$link;
 	}
 }
