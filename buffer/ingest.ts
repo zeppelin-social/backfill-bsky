@@ -39,7 +39,7 @@ if (process.argv.join(" ").includes("--max-per-second")) {
 	);
 }
 
-const FLUSH_EVERY_N_MESSAGES = 500_000;
+const FLUSH_EVERY_N_MESSAGES = 100_000;
 
 let messagesSent = 0, messagesProcessed = 0;
 
@@ -150,7 +150,7 @@ class FromBufferSubscription extends FirehoseSubscription {
 		await new Promise<void>((resolve) => {
 			const interval = setInterval(() => {
 				if (
-					!this.info.queuedTasks || this.info.queuedTasks < (FLUSH_EVERY_N_MESSAGES / 10)
+					!this.info.queuedTasks || this.info.queuedTasks < (FLUSH_EVERY_N_MESSAGES / 2)
 				) {
 					clearInterval(interval);
 					resolve();
