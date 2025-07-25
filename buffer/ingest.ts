@@ -1,4 +1,3 @@
-import { readCar as iterateCar } from "@atcute/car";
 import { MemoryCache } from "@atproto/identity";
 import { lexToJson } from "@atproto/lexicon";
 import { WriteOpAction } from "@atproto/repo";
