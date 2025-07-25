@@ -35,7 +35,7 @@ import {
 	type ProfileDoc,
 } from "../backfill/workers/opensearch";
 import { type ToInsertCommit, writeWorkerAllocations } from "../backfill/workers/writeCollection";
-import { is } from "./util/lexicons";
+import { is } from "../backfill/util/lexicons";
 
 declare global {
 	namespace NodeJS {
