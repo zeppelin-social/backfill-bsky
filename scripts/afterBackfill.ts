@@ -591,7 +591,7 @@ async function retryFailedWrites(db: Database) {
 
 			const uri = new AtUri(msg.uri);
 			fixCids(msg.obj);
-			if (!is(uri.collection, msg.obj)) { // silly, don't ask
+			if (!is(uri.collection, msg.obj)) {
 				console.log(`Skipping invalid record ${JSON.stringify(msg.obj)}`);
 				continue;
 			}
@@ -604,8 +604,8 @@ async function retryFailedWrites(db: Database) {
 			});
 			seenUris.set(msg.uri, true);
 
-			try {
-				if (batch.length >= RECORDS_BATCH_SIZE) {
+			if (batch.length >= RECORDS_BATCH_SIZE) {
+				try {
 					console.time(
 						`bulk indexing to records ${batch.length} records at line ${recordsPosition}`,
 					);
@@ -613,13 +613,13 @@ async function retryFailedWrites(db: Database) {
 					console.timeEnd(
 						`bulk indexing to records ${batch.length} records at line ${recordsPosition}`,
 					);
+				} catch (e) {
+					console.error(`Failed to index records`, e);
+					if (`${e}`.includes("Out of memory")) exit();
+				} finally {
+					batch = [];
+					fs.writeFileSync(`./failed-records.pos`, `${recordsPosition}`);
 				}
-			} catch (e) {
-				console.error(`Failed to index records`, e);
-				if (`${e}`.includes("Out of memory")) exit();
-			} finally {
-				batch = [];
-				fs.writeFileSync(`./failed-records.pos`, `${recordsPosition}`);
 			}
 		}
 	})();
@@ -659,28 +659,28 @@ async function retryFailedWrites(db: Database) {
 
 			if (seenUris.has(msg.uri)) continue;
 
-			try {
-				if (
-					!isCanonicalResourceUri(msg.uri) || !isCid(msg.cid)
-					|| isNaN(new Date(msg.timestamp).getTime())
-				) continue;
+			if (
+				!isCanonicalResourceUri(msg.uri) || !isCid(msg.cid)
+				|| isNaN(new Date(msg.timestamp).getTime())
+			) continue;
 
-				const uri = new AtUri(msg.uri);
-				fixCids(msg.obj);
-				if (!is(uri.collection, msg.obj)) { // silly, don't ask
-					console.log(`Skipping invalid record ${JSON.stringify(msg.obj)}`);
-					continue;
-				}
+			const uri = new AtUri(msg.uri);
+			fixCids(msg.obj);
+			if (!is(uri.collection, msg.obj)) {
+				console.log(`Skipping invalid record ${JSON.stringify(msg.obj)}`);
+				continue;
+			}
 
-				batch.push({
-					uri,
-					cid: CID.parse(msg.cid),
-					timestamp: msg.timestamp,
-					obj: jsonToLex(msg.obj),
-				});
-				seenUris.set(msg.uri, true);
+			batch.push({
+				uri,
+				cid: CID.parse(msg.cid),
+				timestamp: msg.timestamp,
+				obj: jsonToLex(msg.obj),
+			});
+			seenUris.set(msg.uri, true);
 
-				if (batch.length >= RECORDS_BATCH_SIZE) {
+			if (batch.length >= RECORDS_BATCH_SIZE) {
+				try {
 					console.time(
 						`bulk indexing to collection ${collection} ${batch.length} records at line ${
 							collectionPositions[collection]
@@ -695,15 +695,17 @@ async function retryFailedWrites(db: Database) {
 							collectionPositions[collection]
 						}`,
 					);
+				} catch (e) {
+					console.error(
+						`Failed to index collection records for ${collection} on line ${
+							collectionPositions[collection]
+						}`,
+						e,
+					);
+					if (`${e}`.includes("Out of memory")) exit();
+				} finally {
+					batch = [];
 				}
-			} catch (e) {
-				console.warn(
-					`Skipping records for ${collection} on line ${collectionPositions[collection]}`,
-					e,
-				);
-				if (`${e}`.includes("Out of memory")) exit();
-			} finally {
-				batch = [];
 			}
 		}
 	});
