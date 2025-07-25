@@ -587,8 +587,8 @@ async function retryFailedWrites(db: Database) {
 			) continue;
 
 			const uri = new AtUri(msg.uri);
-			const lex =  jsonToLex(msg.obj);
-			if (!is(uri.collection, lexToJson(lex))) { // silly, don't ask
+			fixCids(uri.collection, msg.obj);
+			if (!is(uri.collection, msg.obj)) { // silly, don't ask
 				console.log(`Skipping invalid record ${JSON.stringify(msg.obj)}`);
 				continue;
 			};
@@ -597,7 +597,7 @@ async function retryFailedWrites(db: Database) {
 				uri,
 				cid: CID.parse(msg.cid),
 				timestamp: msg.timestamp,
-				obj: lex,
+				obj: jsonToLex(msg.obj),
 			});
 			seenUris.set(msg.uri, true);
 
@@ -663,9 +663,9 @@ async function retryFailedWrites(db: Database) {
 				) continue;
 
 				const uri = new AtUri(msg.uri);
-				const lex =  jsonToLex(msg.obj);
-				if (!is(uri.collection, lexToJson(lex))) { // silly, don't ask
-					console.log(`Skipping invalid record for collection ${uri.collection} ${JSON.stringify(msg.obj)}`);
+				fixCids(uri.collection, msg.obj);
+				if (!is(uri.collection, msg.obj)) { // silly, don't ask
+					console.log(`Skipping invalid record ${JSON.stringify(msg.obj)}`);
 					continue;
 				};
 
@@ -673,7 +673,7 @@ async function retryFailedWrites(db: Database) {
 					uri,
 					cid: CID.parse(msg.cid),
 					timestamp: msg.timestamp,
-					obj: lex,
+					obj: jsonToLex(msg.obj),
 				});
 				seenUris.set(msg.uri, true);
 
@@ -849,4 +849,22 @@ function chunkArray<T>(arr: T[], chunkSize: number): T[][] {
 		chunks.push(arr.slice(i, i + chunkSize));
 	}
 	return chunks;
+}
+
+function fixCids(collection: string, obj: any) {
+	if (collection === "app.bsky.feed.post") {
+		if (obj.reply?.root?.cid?.$link) obj.reply.root.cid = obj.reply.root.cid.$link;
+		if (obj.reply?.parent?.cid?.$link) obj.reply.parent.cid = obj.reply.parent.cid.$link;
+		if (obj.embed?.record?.cid?.$link) obj.embed.record.cid = obj.embed.record.cid.$link;
+		if (obj.embed?.record?.record?.cid?.$link) obj.embed.record.record.cid = obj.embed.record.record.cid.$link;
+	} else if (collection === "app.bsky.feed.like") {
+		if (obj.subject?.cid?.$link) obj.subject.cid = obj.subject.cid.$link;
+		if (obj.via?.cid?.$link) obj.via.cid = obj.via.cid.$link;
+	} else if (collection === "app.bsky.feed.repost") {
+		if (obj.subject?.cid?.$link) obj.subject.cid = obj.subject.cid.$link;
+		if (obj.via?.cid?.$link) obj.via.cid = obj.via.cid.$link;
+	} else if (collection === "app.bsky.actor.profle") {
+		if (obj.joinedViaStarterPack?.$link) obj.joinedViaStarterPack = obj.joinedViaStarterPack.$link;
+		if (obj.pinnedPost?.$link) obj.pinnedPost = obj.pinnedPost.$link;
+	} else if (collection === "app.bsky.feed.reply") {
 }
