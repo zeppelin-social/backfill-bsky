@@ -73,7 +73,7 @@ async function main() {
 	const getBufferSize = () => collectionBuffer.values().reduce((acc, arr) => acc + arr.length, 0);
 
 	const otherEvts = new PQueue({ concurrency: 20 });
-	otherEvts.on("error", console.error);
+	otherEvts.on("error", (e) => console.error("Error in otherEvts", e));
 
 	const onExit = () => {
 		console.log("Received SIGINT, trying to gracefully exit");
@@ -131,14 +131,18 @@ async function main() {
 			console.time("Flushing other events");
 			await Promise.all([
 				Promise.all([
-					idxSvc.bulkIndexToRecordTable(allRecords).catch(console.error),
+					idxSvc.bulkIndexToRecordTable(allRecords).catch((e) =>
+						console.error("Error bulk indexing to record table", e)
+					),
 					idxSvc.bulkIndexToCollectionSpecificTables(collectionBuffer, {
 						validate: false,
-					}).catch(console.error),
+					}).catch((e) =>
+						console.error("Error bulk indexing to collection specific tables", e)
+					),
 				]).finally(() => console.timeEnd(str)),
-				otherEvts.onSizeLessThan(100).catch(console.error).finally(() =>
-					console.timeEnd("Flushing other events")
-				), // Just want to prevent it from getting too big
+				otherEvts.onSizeLessThan(100).catch((e) =>
+					console.error("Error flushing other events", e)
+				).finally(() => console.timeEnd("Flushing other events")), // Just want to prevent it from getting too big
 			]);
 		} catch (err) {
 			console.error("Error flushing batch – writing to disk", err);
@@ -156,17 +160,25 @@ async function main() {
 
 	function processEvent(evt: Event) {
 		if (evt.$type === "com.atproto.sync.subscribeRepos#identity") {
-			void otherEvts.add(() => indexingSvc.indexHandle(evt.did, evt.time, true)).catch(
-				console.error,
+			void otherEvts.add(() =>
+				indexingSvc.indexHandle(evt.did, evt.time, true).catch((e) =>
+					console.error("Error indexing handle", e)
+				)
 			);
 			return;
 		} else if (evt.$type === "com.atproto.sync.subscribeRepos#account") {
 			if (evt.active === false && evt.status === "deleted") {
-				void otherEvts.add(() => indexingSvc.deleteActor(evt.did)).catch(console.error);
+				void otherEvts.add(() =>
+					indexingSvc.deleteActor(evt.did).catch((e) =>
+						console.error("Error deleting actor", e)
+					)
+				);
 			} else {
 				void otherEvts.add(() =>
-					indexingSvc.updateActorStatus(evt.did, evt.active, evt.status)
-				).catch(console.error);
+					indexingSvc.updateActorStatus(evt.did, evt.active, evt.status).catch((e) =>
+						console.error("Error updating actor status", e)
+					)
+				);
 			}
 			return;
 		} else if (evt.$type === "com.atproto.sync.subscribeRepos#sync") {
@@ -196,8 +208,8 @@ async function main() {
 								evt.time,
 								{ skipValidation: true },
 							)
-						)
-					).catch(console.error);
+						).catch((e) => console.error("Error updating record", e))
+					);
 				} else {
 					if (!collectionBuffer.has(uri.collection)) {
 						collectionBuffer.set(uri.collection, []);
