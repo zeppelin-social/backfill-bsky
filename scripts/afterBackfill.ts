@@ -587,7 +587,8 @@ async function retryFailedWrites(db: Database) {
 			) continue;
 
 			const uri = new AtUri(msg.uri);
-			if (!is(uri.collection, msg.obj)) {
+			const lex =  jsonToLex(msg.obj);
+			if (!is(uri.collection, lexToJson(lex))) { // silly, don't ask
 				console.log(`Skipping invalid record ${JSON.stringify(msg.obj)}`);
 				continue;
 			};
@@ -596,7 +597,7 @@ async function retryFailedWrites(db: Database) {
 				uri,
 				cid: CID.parse(msg.cid),
 				timestamp: msg.timestamp,
-				obj: jsonToLex(msg.obj),
+				obj: lex,
 			});
 			seenUris.set(msg.uri, true);
 
@@ -662,8 +663,9 @@ async function retryFailedWrites(db: Database) {
 				) continue;
 
 				const uri = new AtUri(msg.uri);
-				if (!is(uri.collection, msg.obj)) {
-					console.log(`Skipping invalid record ${JSON.stringify(msg.obj)}`);
+				const lex =  jsonToLex(msg.obj);
+				if (!is(uri.collection, lexToJson(lex))) { // silly, don't ask
+					console.log(`Skipping invalid record for collection ${uri.collection} ${JSON.stringify(msg.obj)}`);
 					continue;
 				};
 
@@ -671,7 +673,7 @@ async function retryFailedWrites(db: Database) {
 					uri,
 					cid: CID.parse(msg.cid),
 					timestamp: msg.timestamp,
-					obj: jsonToLex(msg.obj),
+					obj: lex,
 				});
 				seenUris.set(msg.uri, true);
 

@@ -206,9 +206,6 @@ export function jsonToLex(val: Record<string, unknown>): unknown {
 			}
 			return toReturn;
 		}
-		if (isCid(val)) {
-			return CID.parse(val);
-		}
 	} catch {
 		// pass through
 	}
