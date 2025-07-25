@@ -28,6 +28,7 @@ import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline/promises";
 import { IndexingService } from "../backfill/indexingService";
+import { is } from "../backfill/util/lexicons";
 import {
 	POST_INDEX,
 	type PostDoc,
@@ -35,7 +36,6 @@ import {
 	type ProfileDoc,
 } from "../backfill/workers/opensearch";
 import { type ToInsertCommit, writeWorkerAllocations } from "../backfill/workers/writeCollection";
-import { is } from "../backfill/util/lexicons";
 
 declare global {
 	namespace NodeJS {
@@ -591,7 +591,7 @@ async function retryFailedWrites(db: Database) {
 			if (!is(uri.collection, msg.obj)) { // silly, don't ask
 				console.log(`Skipping invalid record ${JSON.stringify(msg.obj)}`);
 				continue;
-			};
+			}
 
 			batch.push({
 				uri,
@@ -667,7 +667,7 @@ async function retryFailedWrites(db: Database) {
 				if (!is(uri.collection, msg.obj)) { // silly, don't ask
 					console.log(`Skipping invalid record ${JSON.stringify(msg.obj)}`);
 					continue;
-				};
+				}
 
 				batch.push({
 					uri,
@@ -685,7 +685,7 @@ async function retryFailedWrites(db: Database) {
 					);
 					await indexingSvc.bulkIndexToCollectionSpecificTables(
 						new Map([[collection, batch]]),
-						{ validate: false }
+						{ validate: false },
 					);
 					console.timeEnd(
 						`bulk indexing to collection ${collection} ${batch.length} records at line ${
@@ -695,9 +695,8 @@ async function retryFailedWrites(db: Database) {
 				}
 			} catch (e) {
 				console.warn(
-					`Skipping records for ${collection} on line ${
-						collectionPositions[collection]
-					}`, e
+					`Skipping records for ${collection} on line ${collectionPositions[collection]}`,
+					e,
 				);
 				if (`${e}`.includes("Out of memory")) exit();
 			} finally {
@@ -856,7 +855,9 @@ function fixCids(collection: string, obj: any) {
 		if (obj.reply?.root?.cid?.$link) obj.reply.root.cid = obj.reply.root.cid.$link;
 		if (obj.reply?.parent?.cid?.$link) obj.reply.parent.cid = obj.reply.parent.cid.$link;
 		if (obj.embed?.record?.cid?.$link) obj.embed.record.cid = obj.embed.record.cid.$link;
-		if (obj.embed?.record?.record?.cid?.$link) obj.embed.record.record.cid = obj.embed.record.record.cid.$link;
+		if (obj.embed?.record?.record?.cid?.$link) {
+			obj.embed.record.record.cid = obj.embed.record.record.cid.$link;
+		}
 	} else if (collection === "app.bsky.feed.like") {
 		if (obj.subject?.cid?.$link) obj.subject.cid = obj.subject.cid.$link;
 		if (obj.via?.cid?.$link) obj.via.cid = obj.via.cid.$link;
@@ -864,7 +865,9 @@ function fixCids(collection: string, obj: any) {
 		if (obj.subject?.cid?.$link) obj.subject.cid = obj.subject.cid.$link;
 		if (obj.via?.cid?.$link) obj.via.cid = obj.via.cid.$link;
 	} else if (collection === "app.bsky.actor.profle") {
-		if (obj.joinedViaStarterPack?.$link) obj.joinedViaStarterPack = obj.joinedViaStarterPack.$link;
+		if (obj.joinedViaStarterPack?.$link) {
+			obj.joinedViaStarterPack = obj.joinedViaStarterPack.$link;
+		}
 		if (obj.pinnedPost?.$link) obj.pinnedPost = obj.pinnedPost.$link;
-	} else if (collection === "app.bsky.feed.reply") {
+	}
 }
