@@ -548,9 +548,10 @@ async function retryFailedWrites(db: Database) {
 
 	const seenUris = new LRUCache<string, boolean>({ max: 5_000_000 });
 
-	let recordsPosition = fs.existsSync("./failed-records.pos")
+	const recordsStartingPosition = fs.existsSync("./failed-records.pos")
 		? parseInt(fs.readFileSync("./failed-records.pos", "utf8"))
 		: 0;
+	let recordsPosition = 0;
 	let collectionPositions: Record<string, number> = {};
 
 	const recordsPromise = (async () => {
@@ -559,6 +560,7 @@ async function retryFailedWrites(db: Database) {
 
 		for await (const line of rl) {
 			recordsPosition++;
+			if (recordsPosition < recordsStartingPosition) continue;
 			let msg;
 			try {
 				msg = JSON.parse(line) as {
@@ -603,12 +605,15 @@ async function retryFailedWrites(db: Database) {
 		const fstream = fs.createReadStream(`./failed-${collection}.jsonl`);
 		const rl = readline.createInterface({ input: fstream, crlfDelay: Infinity });
 
-		collectionPositions[collection] = fs.existsSync(`./failed-${collection}.pos`)
+		const startingPosition = fs.existsSync(`./failed-${collection}.pos`)
 			? parseInt(fs.readFileSync(`./failed-${collection}.pos`, "utf8"))
 			: 0;
 
+		collectionPositions[collection] = 0;
+
 		for await (const line of rl) {
 			collectionPositions[collection]++;
+			if (collectionPositions[collection] < startingPosition) continue;
 			let msg;
 			try {
 				msg = JSON.parse(line) as {
