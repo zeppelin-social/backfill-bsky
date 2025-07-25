@@ -35,6 +35,7 @@ import {
 	type ProfileDoc,
 } from "../backfill/workers/opensearch";
 import { type ToInsertCommit, writeWorkerAllocations } from "../backfill/workers/writeCollection";
+import { is } from "./util/lexicons";
 
 declare global {
 	namespace NodeJS {
@@ -585,8 +586,11 @@ async function retryFailedWrites(db: Database) {
 				|| isNaN(new Date(msg.timestamp).getTime())
 			) continue;
 
+			const uri = new AtUri(msg.uri);
+			if (!is(uri.collection, msg.obj)) continue;
+
 			batch.push({
-				uri: new AtUri(msg.uri),
+				uri,
 				cid: CID.parse(msg.cid),
 				timestamp: msg.timestamp,
 				obj: jsonToLex(msg.obj),
@@ -654,8 +658,11 @@ async function retryFailedWrites(db: Database) {
 					|| isNaN(new Date(msg.timestamp).getTime())
 				) continue;
 
+				const uri = new AtUri(msg.uri);
+				if (!is(uri.collection, msg.obj)) continue;
+
 				batch.push({
-					uri: new AtUri(msg.uri),
+					uri,
 					cid: CID.parse(msg.cid),
 					timestamp: msg.timestamp,
 					obj: jsonToLex(msg.obj),
@@ -670,7 +677,7 @@ async function retryFailedWrites(db: Database) {
 					);
 					await indexingSvc.bulkIndexToCollectionSpecificTables(
 						new Map([[collection, batch]]),
-						{ validate: false }, // backfill already did this when parsing repo
+						{ validate: false }
 					);
 					console.timeEnd(
 						`bulk indexing to collection ${collection} ${batch.length} records at line ${
