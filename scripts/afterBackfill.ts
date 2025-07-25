@@ -855,11 +855,13 @@ function chunkArray<T>(arr: T[], chunkSize: number): T[][] {
 
 function fixCids(obj: any) {
 	if (typeof obj !== "object" || !obj) return;
-	if (obj.uri && obj.cid && obj.cid.$link && Object.keys(obj).length === 2) {
+	if (
+		obj.uri && obj.cid && obj.cid.$link
+		&& (Object.keys(obj).length === 2 || obj.$type === "com.atproto.repo.strongRef")
+	) {
 		obj.cid = obj.cid.$link;
 	} else {
 		for (const key in obj) {
-			if (key === "$link") continue;
 			fixCids(obj[key]);
 		}
 	}
