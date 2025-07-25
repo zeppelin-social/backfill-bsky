@@ -188,16 +188,20 @@ async function main() {
 				void otherEvts.add(() => indexingSvc.deleteRecord(uri));
 			} else {
 				const record = jsonToLex(op.record);
+				const cid = parseCid(op.cid);
 				if (!is(uri.collection, record)) continue;
 				if (op.action === "update") {
+					// TODO: change this to a regular update once skipValidation is passed through to updateRecord
 					void otherEvts.add(() =>
-						indexingSvc.indexRecord(
-							uri,
-							parseCid(op.cid),
-							record,
-							WriteOpAction.Update,
-							evt.time,
-							{ skipValidation: true },
+						indexingSvc.deleteRecord(uri).then(() =>
+							indexingSvc.indexRecord(
+								uri,
+								cid,
+								record,
+								WriteOpAction.Create,
+								evt.time,
+								{ skipValidation: true },
+							)
 						)
 					).catch(console.error);
 				} else {
@@ -206,7 +210,7 @@ async function main() {
 					}
 					collectionBuffer.get(uri.collection)!.push({
 						uri,
-						cid: parseCid(op.cid),
+						cid,
 						timestamp: evt.time,
 						obj: record,
 					});
