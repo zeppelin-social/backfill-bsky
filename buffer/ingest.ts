@@ -170,13 +170,7 @@ async function main() {
 			}
 			return;
 		} else if (evt.$type === "com.atproto.sync.subscribeRepos#sync") {
-			const cid = parseCid(iterateCar(evt.blocks).header.data.roots[0]);
-			void otherEvts.add(() =>
-				Promise.all([
-					indexingSvc.setCommitLastSeen(evt.did, cid, evt.rev),
-					indexingSvc.indexHandle(evt.did, evt.time),
-				])
-			).catch(console.error);
+			// skip; we don't have blocks
 			return;
 		} else if (evt.$type !== "com.atproto.sync.subscribeRepos#commit") return;
 
