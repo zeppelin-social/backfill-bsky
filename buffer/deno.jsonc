@@ -17,7 +17,7 @@
 		"@std/streams": "jsr:@std/streams@^1.0.9",
 		"@types/node": "npm:@types/node@^22.15.19",
 		"@zeppelin-social/bsky": "npm:@zeppelin-social/bsky@^0.0.171",
-		"@zeppelin-social/bsky-backfill": "npm:@zeppelin-social/bsky-backfill@^0.0.174",
+		"@zeppelin-social/bsky-backfill": "npm:@zeppelin-social/bsky-backfill@^0.0.175",
 		"multiformats": "npm:multiformats@9.9.0",
 		"p-queue": "npm:p-queue@^8.1.0",
 		"partysocket": "npm:partysocket@^1.1.4"
