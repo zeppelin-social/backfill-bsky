@@ -232,6 +232,7 @@ export async function repoWorker() {
 
 	async function sendCommits() {
 		clearTimeout(sendTimer);
+		sendTimer = setTimeout(sendCommits, 300);
 
 		const entries = Object.entries(commitData);
 		commitData = {};
@@ -275,11 +276,11 @@ export async function repoWorker() {
 			}
 		}
 
-		sendTimer = setTimeout(sendCommits, 300);
-
-		console.time(`Saving ${entries.length} commits`);
-		await Promise.allSettled(promises);
-		console.timeEnd(`Saving ${entries.length} commits`);
+		if (promises.length) {
+			console.time(`Saving ${entries.length} commits`);
+			await Promise.allSettled(promises);
+			console.timeEnd(`Saving ${entries.length} commits`);
+		}
 	}
 
 	async function processActorQueue() {
