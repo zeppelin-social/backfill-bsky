@@ -4,6 +4,7 @@ import { createClient } from "@redis/client";
 import { BackgroundQueue, Database } from "@zeppelin-social/bsky-backfill";
 import Queue from "bee-queue";
 import fs from "node:fs/promises";
+import { setTimeout as sleep } from "node:timers/promises";
 import PQueue from "p-queue";
 import { IdResolver, IndexingService } from "../indexingService.js";
 import type { FromWorkerMessage } from "../main.js";
@@ -49,6 +50,7 @@ export async function repoWorker() {
 
 	const xrpc = new XRPCManager();
 
+	let backPressured: Promise<unknown> | null = null;
 	let isShuttingDown = false;
 
 	let commitData: Record<string, CommitData[]> = {};
@@ -118,6 +120,7 @@ export async function repoWorker() {
 	async function processRepo(job: Queue.Job<{ did: string; pds: string }>, attempt = 0) {
 		if (!process?.send) throw new Error("Not a worker process");
 		if (isShuttingDown) return;
+		if (backPressured) await backPressured;
 
 		const { did, pds } = job.data;
 
@@ -203,13 +206,21 @@ export async function repoWorker() {
 			}
 		}
 		parsed++;
+
+		if (Object.values(commitData).reduce((a, c) => a + c.length, 0) > 20_000) {
+			sendCommits();
+		}
 	}
 
 	function sendCommits() {
 		const entries = Object.entries(commitData);
 		commitData = {};
 		for (const [collection, commits] of entries) {
-			process.send!({ type: "commit", collection, commits } satisfies FromWorkerMessage);
+			if (process.send?.({ type: "commit", collection, commits } satisfies FromWorkerMessage)) {
+				backPressured = sleep(100).then(() => {
+					backPressured = null;
+				});
+			}
 		}
 		setTimeout(sendCommits, 1000);
 	}
