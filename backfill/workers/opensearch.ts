@@ -1,10 +1,11 @@
 import type { AppBskyActorProfile, AppBskyFeedPost } from "@atcute/bluesky";
 import { type Did, parseCanonicalResourceUri } from "@atcute/lexicons";
 import { Client as OpenSearchClient } from "@opensearch-project/opensearch";
+import Queue from "bee-queue";
 import fs from "node:fs/promises";
 import normalizeUrl from "normalize-url";
 import type { FromWorkerMessage } from "../main.js";
-import type { CommitMessage } from "./repo.js";
+import type { CommitData } from "./repo.js";
 
 export const POST_INDEX = "palomar_post";
 export const PROFILE_INDEX = "palomar_profile";
@@ -34,32 +35,31 @@ export async function openSearchWorker() {
 
 	let isShuttingDown = false;
 
-	process.on("message", async (msg: CommitMessage | { type: "shutdown" }) => {
-		if (msg.type === "shutdown") {
-			await handleShutdown();
-			return;
-		}
+	const queue = new Queue<{ collection: string; commits: CommitData[] }>("records-write", {
+		removeOnSuccess: true,
+		removeOnFailure: true,
+		isWorker: true,
+	});
 
+	queue.on("error", (err) => {
+		console.error(`Queue error for records write:`, err);
+	});
+
+	queue.on("failed", (_, err) => {
+		console.error(`Job failed for records write:`, err);
+	});
+
+	queue.process(10, async (job) => {
 		if (isShuttingDown) return;
-
-		if (msg.type !== "commit") {
-			throw new Error(`Invalid message type ${msg}`);
-		}
-
-		if (
-			msg.collection !== "app.bsky.feed.post" && msg.collection !== "app.bsky.actor.profile"
-		) {
-			return;
-		}
-
-		for (const commit of msg.commits) {
+		const { collection, commits } = job.data;
+		for (const commit of commits) {
 			const { did, path, cid, timestamp, obj } = commit;
 			if (!did || !path || !cid || !timestamp || !obj) {
 				console.error(`Invalid commit data ${JSON.stringify(commit)}`);
 				continue;
 			}
 
-			if (msg.collection === "app.bsky.feed.post") {
+			if (collection === "app.bsky.feed.post") {
 				const rkey = path.split("/")[1];
 				if (rkey) {
 					postQueue.push(
@@ -67,7 +67,7 @@ export async function openSearchWorker() {
 						transformPost(obj as AppBskyFeedPost.Main, did as Did, rkey, cid),
 					);
 				}
-			} else if (msg.collection === "app.bsky.actor.profile") {
+			} else if (collection === "app.bsky.actor.profile") {
 				profileQueue.push(
 					// We can assert obj because the repo worker checks for record validity
 					transformProfile(obj as AppBskyActorProfile.Main, did as Did, cid),
@@ -77,14 +77,19 @@ export async function openSearchWorker() {
 
 		if (postQueue.length > 100_000 || profileQueue.length > 100_000) {
 			clearTimeout(queueTimer);
-			queueTimer = setImmediate(processQueue);
+			await processQueue();
 		}
 	});
 
+	process.on("message", async (msg: { type: "shutdown" }) => {
+		if (msg.type === "shutdown") {
+			await handleShutdown();
+			return;
+		}
+	});
 	process.on("uncaughtException", (err) => {
 		console.error(`Uncaught exception in OpenSearch worker`, err);
 	});
-
 	process.on("SIGTERM", handleShutdown);
 	process.on("SIGINT", handleShutdown);
 

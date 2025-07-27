@@ -10,6 +10,7 @@ import { IdResolver, IndexingService } from "../indexingService.js";
 import type { FromWorkerMessage } from "../main.js";
 import { is } from "../util/lexicons.js";
 import { RetryError, XRPCManager } from "../util/xrpc.js";
+import { writeWorkerAllocations } from "./writeCollection.js";
 
 export type CommitData = {
 	did: string;
@@ -31,16 +32,42 @@ export async function repoWorker() {
 		isWorker: true,
 	});
 
+	const writeQueues = {
+		records: new Queue<{ commits: CommitData[] }>("records-write", {
+			removeOnSuccess: true,
+			removeOnFailure: true,
+			isWorker: false,
+		}),
+		opensearch: new Queue<{ collection: string; commits: CommitData[] }>("opensearch-write", {
+			removeOnSuccess: true,
+			removeOnFailure: true,
+			isWorker: false,
+		}),
+		collections: Object.fromEntries(
+			writeWorkerAllocations.flat().map((
+				collection,
+			) => [
+				collection,
+				new Queue<{ commits: CommitData[] }>(`collection-write-${collection}`, {
+					removeOnSuccess: true,
+					removeOnFailure: true,
+					isWorker: false,
+				}),
+			]),
+		),
+	};
+
 	const db = new Database({
 		url: process.env.BSKY_DB_POSTGRES_URL,
 		schema: process.env.BSKY_DB_POSTGRES_SCHEMA,
-		poolIdleTimeoutMs: 60_000,
+		poolIdleTimeoutMs: 30_000,
 	});
 
 	const idResolver = new IdResolver({
 		plcUrl: process.env.BSKY_DID_PLC_URL,
 		fallbackPlc: process.env.FALLBACK_PLC_URL,
-		didCache: new MemoryCache(),
+		// 30s stale, 60s max; very short because we should only really see any given identity once
+		didCache: new MemoryCache(30 * 1000, 60 * 1000),
 	});
 
 	const indexingSvc = new IndexingService(db, idResolver, new BackgroundQueue(db));
@@ -71,7 +98,7 @@ export async function repoWorker() {
 	process.on("SIGTERM", handleShutdown);
 	process.on("SIGINT", handleShutdown);
 
-	setTimeout(sendCommits, 200);
+	setTimeout(sendCommits, 300);
 
 	setTimeout(processActorQueue, 10_000);
 
@@ -134,9 +161,8 @@ export async function repoWorker() {
 			const now = Date.now();
 			const repo = RepoReader.fromStream(bytes);
 			for await (const { record, rkey, collection, cid } of repo) {
-				const path = `${collection}/${rkey}`;
-
-				if (!is(collection, record)) { // This allows us to set { validate: false } in the collection worker
+				if (!(collection in writeQueues.collections) || !is(collection, record)) {
+					// This allows us to set { validate: false } in the collection worker
 					continue;
 				}
 
@@ -158,7 +184,7 @@ export async function repoWorker() {
 
 				const data = {
 					did,
-					path,
+					path: `${collection}/${rkey}`,
 					cid: cid.$link,
 					timestamp: new Date(indexedAt).toISOString(),
 					obj: record,
@@ -179,13 +205,51 @@ export async function repoWorker() {
 		parsed++;
 	}
 
-	function sendCommits() {
+	async function sendCommits() {
 		const entries = Object.entries(commitData);
 		commitData = {};
+		if (!entries.length) return;
+
+		const promises: Promise<unknown>[] = [];
+
+		promises.push(
+			writeQueues.records.saveAll(
+				entries.map((
+					[_collection, commits],
+				) => (writeQueues.records.createJob({ commits }))),
+			).catch((err) => {
+				console.error(`Error saving records commits:`, err);
+			}),
+		);
+
 		for (const [collection, commits] of entries) {
-			process.send!({ type: "commit", collection, commits } satisfies FromWorkerMessage);
+			if (!commits.length) continue;
+
+			promises.push(
+				writeQueues.collections[collection].saveAll(commits.map((commit) =>
+					writeQueues.collections[collection].createJob({ commits: [commit] })
+				)).catch((err) => {
+					console.error(`Error saving commits for ${collection}:`, err);
+				}),
+			);
+
+			if (
+				(collection === "app.bsky.feed.post" || collection === "app.bsky.actor.profile")
+				&& process.env.OPENSEARCH_URL
+			) {
+				promises.push(
+					writeQueues.opensearch.saveAll(commits.map((commit) =>
+						writeQueues.opensearch.createJob({ collection, commits: [commit] })
+					)).catch((err) => {
+						console.error(`Error saving opensearch commits for ${collection}:`, err);
+					}),
+				);
+			}
 		}
-		setTimeout(sendCommits, 200);
+
+		setTimeout(sendCommits, 300);
+
+		await Promise.allSettled(promises);
 	}
 
 	async function processActorQueue() {

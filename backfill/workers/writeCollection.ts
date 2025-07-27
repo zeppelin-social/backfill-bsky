@@ -1,15 +1,15 @@
 import { fromBytes } from "@atcute/cbor";
 import { isBlob, isBytes, isCidLink, isLegacyBlob } from "@atcute/lexicons/interfaces";
-import { isCid } from "@atcute/lexicons/syntax";
 import { MemoryCache } from "@atproto/identity";
 import { BlobRef, lexToJson } from "@atproto/lexicon";
 import { AtUri } from "@atproto/syntax";
 import { BackgroundQueue, Database } from "@zeppelin-social/bsky-backfill";
+import Queue from "bee-queue";
 import { CID } from "multiformats/cid";
 import fs from "node:fs/promises";
 import { IdResolver, IndexingService } from "../indexingService.js";
 import type { FromWorkerMessage } from "../main.js";
-import type { CommitMessage } from "./repo.js";
+import type { CommitData } from "./repo.js";
 
 export type ToInsertCommit = { uri: AtUri; cid: CID; timestamp: string; obj: unknown };
 
@@ -48,75 +48,83 @@ export async function writeCollectionWorker() {
 		url: process.env.BSKY_DB_POSTGRES_URL,
 		schema: process.env.BSKY_DB_POSTGRES_SCHEMA,
 		poolSize: 50,
-		poolIdleTimeoutMs: 60_000,
+		poolIdleTimeoutMs: 30_000,
 	});
 
 	const idResolver = new IdResolver({
 		plcUrl: process.env.BSKY_DID_PLC_URL,
 		fallbackPlc: process.env.FALLBACK_PLC_URL,
-		didCache: new MemoryCache(),
+		// 1m stale, 2m max; very short because we should only really see any given identity once or twice
+		didCache: new MemoryCache(1 * 60 * 1000, 2 * 60 * 1000),
 	});
+
 	const indexingSvc = new IndexingService(db, idResolver, new BackgroundQueue(db));
 
-	const queues: Record<string, ToInsertCommit[]> = {};
+	const batches: Record<string, ToInsertCommit[]> = {};
+
+	let isShuttingDown = false;
 
 	for (const collection of collections) {
 		if (!indexingSvc.findIndexerForCollection(collection)) {
 			throw new Error(`No indexer for collection ${collection}`);
 		}
-		queues[collection] = [];
+		batches[collection] = [];
+
+		const queue = new Queue<{ commits: CommitData[] }>(`collection-write-${collection}`, {
+			removeOnSuccess: true,
+			removeOnFailure: true,
+			isWorker: true,
+		});
+
+		queue.on("error", (err) => {
+			console.error(`Queue error for collection ${collection}:`, err);
+		});
+
+		queue.on("failed", (_, err) => {
+			console.error(`Job failed for collection ${collection}:`, err);
+		});
+
+		queue.process(10, async (job) => {
+			if (isShuttingDown) return;
+			const { commits } = job.data;
+
+			for (const commit of commits) {
+				const { did, path, cid: _cid, timestamp, obj: _obj } = commit;
+				if (!did || !path || !_cid || !timestamp || !_obj) {
+					throw new Error(`Invalid commit data ${JSON.stringify(commit)}`);
+				}
+
+				try {
+					const uri = new AtUri(`at://${did}/${path}`);
+					const cid = CID.parse(_cid);
+					const obj = jsonToLex(_obj as Record<string, unknown>);
+
+					batches[collection].push({ uri, cid, timestamp, obj });
+				} catch (err) {
+					console.error(`Error processing commit ${JSON.stringify(commit)}`, err);
+				}
+			}
+
+			if (batches[collection].length > 100_000) {
+				clearTimeout(queueTimer);
+				await processQueue();
+			}
+		});
 	}
 
-	let queueTimer = setTimeout(processQueue, 1000);
-
-	let isShuttingDown = false;
-
-	process.on("message", async (msg: CommitMessage | { type: "shutdown" }) => {
+	process.on("message", async (msg: { type: "shutdown" }) => {
 		if (msg.type === "shutdown") {
 			await handleShutdown();
 			return;
 		}
-
-		if (isShuttingDown) return;
-
-		if (msg.type !== "commit") {
-			throw new Error(`Invalid message type ${msg}`);
-		}
-
-		if (!queues[msg.collection]) {
-			console.warn(`Received commit for unknown collection ${msg.collection}`);
-			return;
-		}
-
-		for (const commit of msg.commits) {
-			const { did, path, cid: _cid, timestamp, obj: _obj } = commit;
-			if (!did || !path || !_cid || !timestamp || !_obj) {
-				throw new Error(`Invalid commit data ${JSON.stringify(commit)}`);
-			}
-
-			try {
-				const uri = new AtUri(`at://${did}/${path}`);
-				const cid = CID.parse(_cid);
-				const obj = jsonToLex(_obj as Record<string, unknown>);
-
-				queues[msg.collection].push({ uri, cid, timestamp, obj });
-			} catch (err) {
-				console.error(`Error processing commit ${JSON.stringify(commit)}`, err);
-			}
-		}
-
-		if (queues[msg.collection].length > 100_000) {
-			clearTimeout(queueTimer);
-			queueTimer = setImmediate(processQueue);
-		}
 	});
-
 	process.on("uncaughtException", (err) => {
 		console.error(`Uncaught exception in worker ${workerIndex}`, err);
 	});
-
 	process.on("SIGTERM", handleShutdown);
 	process.on("SIGINT", handleShutdown);
+
+	let queueTimer = setTimeout(processQueue, 1000);
 
 	async function processQueue() {
 		if (!isShuttingDown) {
@@ -126,11 +134,11 @@ export async function writeCollectionWorker() {
 		let recordCount = 0;
 		const records = new Map<string, ToInsertCommit[]>();
 
-		for (const collection in queues) {
-			if (queues[collection].length > 0) {
-				recordCount += queues[collection].length;
-				records.set(collection, queues[collection]);
-				queues[collection] = [];
+		for (const collection in batches) {
+			if (batches[collection].length > 0) {
+				recordCount += batches[collection].length;
+				records.set(collection, batches[collection]);
+				batches[collection] = [];
 			}
 		}
 

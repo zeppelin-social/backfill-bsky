@@ -2,19 +2,17 @@ import { createClient } from "@redis/client";
 import * as bsky from "@zeppelin-social/bsky-backfill";
 import Queue from "bee-queue";
 import CacheableLookup from "cacheable-lookup";
-import { LRUCache } from "lru-cache";
 import cluster, { type Worker } from "node:cluster";
-import fs from "node:fs/promises";
 import * as os from "node:os";
 import { setTimeout as sleep } from "node:timers/promises";
 import { Agent, RetryAgent, setGlobalDispatcher } from "undici";
 import { fetchAllDids } from "./util/fetch.js";
 import { openSearchWorker } from "./workers/opensearch.js";
-import { type CommitMessage, repoWorker } from "./workers/repo.js";
+import { repoWorker } from "./workers/repo.js";
 import { writeCollectionWorker, writeWorkerAllocations } from "./workers/writeCollection.js";
 import { writeRecordWorker } from "./workers/writeRecord.js";
 
-export type FromWorkerMessage = CommitMessage | { type: "shutdownComplete" } | {
+export type FromWorkerMessage = { type: "shutdownComplete" } | {
 	type: "count";
 	fetched: number;
 	parsed: number;
@@ -104,27 +102,6 @@ if (cluster.isWorker) {
 	const args = process.argv.slice(2);
 	const indexOfInspect = args.findIndex((a) => a.startsWith("--inspect"));
 	cluster.setupPrimary({ args: indexOfInspect > -1 ? args.toSpliced(indexOfInspect, 1) : args });
-
-	const db = new bsky.Database({
-		url: process.env.BSKY_DB_POSTGRES_URL,
-		schema: process.env.BSKY_DB_POSTGRES_SCHEMA,
-		poolSize: 50,
-	});
-
-	await Promise.all(
-		Object.entries(DB_SETTINGS).map(([setting, value]) =>
-			db.pool.query(`ALTER SYSTEM SET ${setting} = ${value}`)
-		),
-	);
-
-	const redis = createClient();
-	await redis.connect();
-
-	const queue = new Queue<{ did: string; pds: string }>("repo-processing", {
-		removeOnSuccess: true,
-		removeOnFailure: true,
-		isWorker: false,
-	});
 
 	const workers = {
 		repo: {},
@@ -223,6 +200,27 @@ if (cluster.isWorker) {
 	};
 	spawnOpenSearchWorker();
 
+	const db = new bsky.Database({
+		url: process.env.BSKY_DB_POSTGRES_URL,
+		schema: process.env.BSKY_DB_POSTGRES_SCHEMA,
+		poolSize: 5,
+	});
+
+	await Promise.all(
+		Object.entries(DB_SETTINGS).map(([setting, value]) =>
+			db.pool.query(`ALTER SYSTEM SET ${setting} = ${value}`)
+		),
+	);
+
+	const redis = createClient();
+	await redis.connect();
+
+	const queue = new Queue<{ did: string; pds: string }>("repo-processing", {
+		removeOnSuccess: true,
+		removeOnFailure: true,
+		isWorker: false,
+	});
+
 	let isShuttingDown = false;
 
 	cluster.on("exit", handleWorkerExit);
@@ -279,13 +277,6 @@ if (cluster.isWorker) {
 			cluster.workers?.[workers.openSearch.id]?.send({ type: "shutdown" });
 		}
 
-		if (failedMessages?.size) {
-			await fs.writeFile(
-				"./failed-worker-messages.jsonl",
-				JSON.stringify([...failedMessages.keys()]),
-			);
-		}
-
 		// Wait for all workers to report completion or timeout
 		const timeoutPromise = new Promise((resolve) => setTimeout(resolve, 60_000));
 		const completionPromise = new Promise((resolve) => {
@@ -332,7 +323,6 @@ if (cluster.isWorker) {
 
 	void main();
 
-	const failedMessages = new LRUCache<CommitMessage, true>({ max: 100_000 });
 	function handleFromWorkerMessage(worker: Worker, message: FromWorkerMessage) {
 		if (message.type === "shutdownComplete") {
 			if (!isShuttingDown) handleWorkerExit(worker, 0, "SIGINT");
@@ -345,54 +335,7 @@ if (cluster.isWorker) {
 			processedOverInterval += message.parsed;
 			return;
 		}
-
-		if (message?.type !== "commit" || !message.collection || !message.commits) {
-			throw new Error(`Received invalid worker message: ${JSON.stringify(message)}`);
-		}
-
-		forwardCommitsToWorkers(message);
 	}
-
-	function forwardCommitsToWorkers(message: CommitMessage) {
-		if (!message.commits.length) return;
-
-		const writeCollectionWorkerId = collectionToWriteWorkerId.get(message.collection);
-		// Repos can contain non-Bluesky records, just ignore them
-		if (writeCollectionWorkerId === undefined) {
-			console.warn(`Received commit for unknown collection ${message.collection}`);
-			return;
-		}
-
-		const writeCollectionWorker = cluster.workers?.[writeCollectionWorkerId];
-		const writeRecordWorker = Math.random() < 0.5
-			? cluster.workers?.[workers.writeRecord.id]
-			: cluster.workers?.[workers.writeRecord2.id];
-
-		try {
-			writeRecordWorker!.send(message);
-			writeCollectionWorker!.send(message);
-			if (
-				workers.openSearch
-				&& (message.collection === "app.bsky.feed.post"
-					|| message.collection === "app.bsky.actor.profile")
-			) {
-				cluster.workers?.[workers.openSearch.id]?.send(message);
-			}
-			failedMessages.delete(message);
-		} catch (e) {
-			console.warn(`Failed to forward message to workers, retrying: ${e}`);
-			failedMessages.set(message, true);
-		}
-	}
-
-	setInterval(() => {
-		const messages = [...failedMessages.keys()];
-		failedMessages.clear();
-
-		for (const msg of messages) {
-			forwardCommitsToWorkers(msg);
-		}
-	}, 5000);
 
 	function handleWorkerExit({ process: { pid } }: Worker, code: number, signal: string) {
 		console.warn(`Worker ${pid} exited with code ${code} and signal ${signal}`);
