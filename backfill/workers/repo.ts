@@ -105,7 +105,7 @@ export async function repoWorker() {
 	process.on("SIGTERM", handleShutdown);
 	process.on("SIGINT", handleShutdown);
 
-	let sendTimer = setTimeout(sendCommits, 300);
+	let sendTimer = setTimeout(sendCommits, 1000);
 
 	setTimeout(processActorQueue, 10_000);
 
@@ -149,6 +149,7 @@ export async function repoWorker() {
 
 	async function processRepo(job: Queue.Job<{ did: string; pds: string }>, attempt = 0) {
 		if (!process?.send) throw new Error("Not a worker process");
+		if (isShuttingDown) return;
 
 		const { did, pds } = job.data;
 
@@ -235,11 +236,16 @@ export async function repoWorker() {
 		}
 
 		parsed++;
+
+		if (Object.values(commitData).reduce((a, c) => a + c.length, 0) > 50_000) {
+			clearTimeout(sendTimer);
+			sendTimer = setImmediate(sendCommits)
+		}
 	}
 
 	async function sendCommits() {
 		clearTimeout(sendTimer);
-		sendTimer = setTimeout(sendCommits, 300);
+		if (!isShuttingDown) sendTimer = setTimeout(sendCommits, 1000);
 
 		const entries = Object.entries(commitData);
 		commitData = {};
