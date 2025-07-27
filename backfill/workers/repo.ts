@@ -6,6 +6,7 @@ import Queue from "bee-queue";
 import fs from "node:fs/promises";
 import { setTimeout as sleep } from "node:timers/promises";
 import PQueue from "p-queue";
+import { getGlobalDispatcher } from "undici";
 import { IdResolver, IndexingService } from "../indexingService.js";
 import type { FromWorkerMessage } from "../main.js";
 import { LRUDidCache } from "../util/cache.js";
@@ -95,25 +96,24 @@ export async function repoWorker() {
 
 	const fmt = (n: number) => (n / 1024 / 1024).toFixed(1) + " MB";
 
-	setInterval(async () => {
-		const mu = process.memoryUsage();
-		const buf = fmt(mu.arrayBuffers);
-		const heap = fmt(mu.heapUsed);
-		const rss = fmt(mu.rss);
+	setInterval(() => {
+		const hr = process.resourceUsage?.() ?? {};
 
 		global.gc?.();
-		const mu2 = process.memoryUsage();
-		const heap2 = fmt(mu2.heapUsed);
 
-		const pendingCommits = Object.values(commitData).reduce((a, c) => a + c.length, 0);
+		const { rss, heapUsed, heapTotal, external, arrayBuffers } = process.memoryUsage();
 
-		const { waiting, active } = await queue.checkHealth();
-
-		const queued = processRepoPQueue.size;
-		const running = processRepoPQueue.pending;
+		const handles = (process as any)._getActiveHandles().length;
+		const undiciStat = (getGlobalDispatcher() as any).stats;
 
 		console.log(
-			`[mem ${process.pid}] buffers=${buf} rss=${rss} heap=${heap} (after gc=${heap2}) commits=${pendingCommits} queue waiting=${waiting} active=${active} queued=${queued} running=${running}`,
+			"[mem] rss=" + fmt(rss)
+				+ " | heap=" + fmt(heapUsed) + "/" + fmt(heapTotal)
+				+ " | external=" + fmt(external)
+				+ " | arrayBuf=" + fmt(arrayBuffers)
+				+ " | handles=" + handles
+				+ (undiciStat ? " | undici sockets=" + JSON.stringify(undiciStat) : "")
+				+ (hr.maxRSS ? " | maxRSS=" + fmt(hr.maxRSS * 1024) : ""),
 		);
 	}, 10_000);
 
@@ -216,7 +216,9 @@ export async function repoWorker() {
 		const entries = Object.entries(commitData);
 		commitData = {};
 		for (const [collection, commits] of entries) {
-			if (process.send?.({ type: "commit", collection, commits } satisfies FromWorkerMessage)) {
+			if (
+				process.send?.({ type: "commit", collection, commits } satisfies FromWorkerMessage)
+			) {
 				backPressured = sleep(100).then(() => {
 					backPressured = null;
 				});
