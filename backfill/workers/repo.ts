@@ -123,6 +123,23 @@ export async function repoWorker() {
 		parsed = 0;
 	}, 1000);
 
+	const fmt = (n: number) => (n / 1024 / 1024).toFixed(1) + " MB";
+
+	setInterval(async () => {
+		const mu = process.memoryUsage();
+		const buf = fmt(mu.arrayBuffers);
+		const heap = fmt(mu.heapUsed);
+		const rss = fmt(mu.rss);
+
+		const pendingCommits = Object.values(commitData).reduce((a, c) => a + c.length, 0);
+
+		const { waiting, active } = await queue.checkHealth();
+
+		console.log(
+			`[mem ${process.pid}] buffers=${buf} rss=${rss} heap=${heap} commits=${pendingCommits} queue waiting=${waiting} active=${active}`,
+		);
+	}, 10_000);
+
 	async function processRepo(job: Queue.Job<{ did: string; pds: string }>, attempt = 0) {
 		if (!process?.send) throw new Error("Not a worker process");
 
@@ -211,11 +228,6 @@ export async function repoWorker() {
 		}
 
 		parsed++;
-
-		if (Object.values(commitData).reduce((a, c) => a + c.length, 0) > 50_000) {
-			clearTimeout(sendTimer);
-			await sendCommits();
-		}
 	}
 
 	async function sendCommits() {
@@ -265,7 +277,9 @@ export async function repoWorker() {
 
 		sendTimer = setTimeout(sendCommits, 300);
 
+		console.time(`Saving ${entries.length} commits`);
 		await Promise.allSettled(promises);
+		console.timeEnd(`Saving ${entries.length} commits`);
 	}
 
 	async function processActorQueue() {
