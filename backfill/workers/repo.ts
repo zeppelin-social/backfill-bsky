@@ -6,7 +6,6 @@ import Queue from "bee-queue";
 import fs from "node:fs/promises";
 import { setTimeout as sleep } from "node:timers/promises";
 import PQueue from "p-queue";
-import { getGlobalDispatcher } from "undici";
 import { IdResolver, IndexingService } from "../indexingService.js";
 import type { FromWorkerMessage } from "../main.js";
 import { LRUDidCache } from "../util/cache.js";
@@ -93,35 +92,6 @@ export async function repoWorker() {
 		fetched = 0;
 		parsed = 0;
 	}, 1000);
-
-	const fmt = (n: number) => (n / 1024 / 1024).toFixed(1) + " MB";
-
-	setInterval(async () => {
-	  global.gc?.()
-
-	  const mu  = process.memoryUsage()
-	  const rssNative =
-	    mu.rss - mu.heapTotal - mu.external - mu.arrayBuffers
-
-	  let fds = 0
-	  try { fds = (await fs.readdir('/proc/self/fd')).length } catch {}
-
-	  const handles = (process as any)._getActiveHandles().length
-
-	  /* undici connection statistics (open & busy sockets) */
-	  const disp = getGlobalDispatcher() as any
-	  const undiciOpen   = disp?.stats?.size ?? 0
-	  const undiciBusy   = disp?.stats?.busy ?? 0
-	  const undiciQueued = disp?.stats?.queued ?? 0
-
-	  console.log(
-	    `[native] rss=${fmt(mu.rss)}  darkNative=${fmt(rssNative)}  ` +
-	    `heapUsed=${fmt(mu.heapUsed)}  ext=${fmt(mu.external)}  ` +
-	    `fds=${fds} handles=${handles}  ` +
-	    `undici(open=${undiciOpen}, busy=${undiciBusy}, queued=${undiciQueued})`
-	  )
-	}, 15_000)
-
 
 	async function processRepo(job: Queue.Job<{ did: string; pds: string }>, attempt = 0) {
 		if (!process?.send) throw new Error("Not a worker process");
