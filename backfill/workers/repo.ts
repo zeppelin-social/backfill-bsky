@@ -135,8 +135,11 @@ export async function repoWorker() {
 
 		const { waiting, active } = await queue.checkHealth();
 
+		const queued = processRepoPQueue.size;
+		const running = processRepoPQueue.pending;
+
 		console.log(
-			`[mem ${process.pid}] buffers=${buf} rss=${rss} heap=${heap} commits=${pendingCommits} queue waiting=${waiting} active=${active}`,
+			`[mem ${process.pid}] buffers=${buf} rss=${rss} heap=${heap} commits=${pendingCommits} queue waiting=${waiting} active=${active} queued=${queued} running=${running}`,
 		);
 	}, 10_000);
 
