@@ -66,7 +66,7 @@ export async function writeCollectionWorker() {
 		queues[collection] = [];
 	}
 
-	let queueTimer = setTimeout(processQueue, 1000);
+	let queueTimer = setTimeout(processQueue, 500);
 
 	let isShuttingDown = false;
 
@@ -119,7 +119,7 @@ export async function writeCollectionWorker() {
 
 	async function processQueue() {
 		if (!isShuttingDown) {
-			queueTimer = setTimeout(processQueue, 1000);
+			queueTimer = setTimeout(processQueue, 500);
 		}
 
 		let recordCount = 0;
