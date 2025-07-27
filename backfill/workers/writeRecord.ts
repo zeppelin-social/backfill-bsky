@@ -1,13 +1,12 @@
 import { lexToJson } from "@atproto/lexicon";
 import { AtUri } from "@atproto/syntax";
 import { BackgroundQueue, Database } from "@zeppelin-social/bsky-backfill";
-import Queue from "bee-queue";
 import { CID } from "multiformats/cid";
 import fs from "node:fs/promises";
 import { IdResolver, IndexingService } from "../indexingService.js";
 import type { FromWorkerMessage } from "../main.js";
 import { LRUDidCache } from "../util/cache.js";
-import type { CommitData } from "./repo.js";
+import type { CommitMessage } from "./repo.js";
 import type { ToInsertCommit } from "./writeCollection.js";
 
 export async function writeRecordWorker() {
@@ -34,27 +33,19 @@ export async function writeRecordWorker() {
 
 	let isShuttingDown = false;
 
-	const queue = new Queue<{ commits: CommitData[] }>("records-write", {
-		sendEvents: false,
-		storeJobs: false,
-		removeOnSuccess: true,
-		removeOnFailure: true,
-		isWorker: true,
-	});
+	process.on("message", async (msg: CommitMessage | { type: "shutdown" }) => {
+		if (msg.type === "shutdown") {
+			await handleShutdown();
+			return;
+		}
 
-	queue.on("error", (err) => {
-		console.error(`Queue error for records write:`, err);
-	});
+		if (isShuttingDown) return; // Don't accept new messages during shutdown
 
-	queue.on("failed", (_, err) => {
-		console.error(`Job failed for records write:`, err);
-	});
+		if (msg.type !== "commit") {
+			throw new Error(`Invalid message type ${msg}`);
+		}
 
-	queue.process(10, async (job) => {
-		if (isShuttingDown) return;
-		const { commits } = job.data;
-
-		for (const commit of commits) {
+		for (const commit of msg.commits) {
 			const { did, path, cid: _cid, timestamp, obj: obj } = commit;
 			if (!did || !path || !_cid || !timestamp || !obj) {
 				throw new Error(`Invalid commit data ${JSON.stringify(commit)}`);
@@ -69,19 +60,14 @@ export async function writeRecordWorker() {
 
 		if (toIndexRecords.length > 100_000) {
 			clearTimeout(recordQueueTimer);
-			await processRecordQueue();
+			recordQueueTimer = setImmediate(processRecordQueue);
 		}
 	});
 
-	process.on("message", async (msg: { type: "shutdown" }) => {
-		if (msg.type === "shutdown") {
-			await handleShutdown();
-			return;
-		}
-	});
 	process.on("uncaughtException", (err) => {
 		console.error(`Uncaught exception in write record worker`, err);
 	});
+
 	process.on("SIGTERM", handleShutdown);
 	process.on("SIGINT", handleShutdown);
 

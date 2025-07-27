@@ -10,7 +10,6 @@ import type { FromWorkerMessage } from "../main.js";
 import { LRUDidCache } from "../util/cache.js";
 import { is } from "../util/lexicons.js";
 import { RetryError, XRPCManager } from "../util/xrpc.js";
-import { writeWorkerAllocations } from "./writeCollection.js";
 
 export type CommitData = {
 	did: string;
@@ -33,37 +32,6 @@ export async function repoWorker() {
 		removeOnFailure: true,
 		isWorker: true,
 	});
-
-	const writeQueues = {
-		records: new Queue<{ commits: CommitData[] }>("records-write", {
-			getEvents: false,
-			storeJobs: false,
-			removeOnSuccess: true,
-			removeOnFailure: true,
-			isWorker: false,
-		}),
-		opensearch: new Queue<{ collection: string; commits: CommitData[] }>("opensearch-write", {
-			getEvents: false,
-			storeJobs: false,
-			removeOnSuccess: true,
-			removeOnFailure: true,
-			isWorker: false,
-		}),
-		collections: Object.fromEntries(
-			writeWorkerAllocations.flat().map((
-				collection,
-			) => [
-				collection,
-				new Queue<{ commits: CommitData[] }>(`collection-write-${collection}`, {
-					getEvents: false,
-					storeJobs: false,
-					removeOnSuccess: true,
-					removeOnFailure: true,
-					isWorker: false,
-				}),
-			]),
-		),
-	};
 
 	const db = new Database({
 		url: process.env.BSKY_DB_POSTGRES_URL,
@@ -105,7 +73,7 @@ export async function repoWorker() {
 	process.on("SIGTERM", handleShutdown);
 	process.on("SIGINT", handleShutdown);
 
-	let sendTimer = setTimeout(sendCommits, 1000);
+	setTimeout(sendCommits, 1000);
 
 	setTimeout(processActorQueue, 10_000);
 
@@ -193,7 +161,7 @@ export async function repoWorker() {
 			const now = Date.now();
 			const repo = RepoReader.fromStream(bytes);
 			for await (const { record, rkey, collection, cid } of repo) {
-				if (!(collection in writeQueues.collections) || !is(collection, record)) {
+				if (!is(collection, record)) {
 					// This allows us to set { validate: false } in the collection worker
 					continue;
 				}
@@ -234,66 +202,16 @@ export async function repoWorker() {
 				await redis.sAdd("backfill:seen", did);
 			}
 		}
-
 		parsed++;
-
-		if (Object.values(commitData).reduce((a, c) => a + c.length, 0) > 50_000) {
-			clearTimeout(sendTimer);
-			sendTimer = setImmediate(sendCommits)
-		}
 	}
 
-	async function sendCommits() {
-		clearTimeout(sendTimer);
-		if (!isShuttingDown) sendTimer = setTimeout(sendCommits, 1000);
-
+	function sendCommits() {
 		const entries = Object.entries(commitData);
 		commitData = {};
-
-		const promises: Promise<unknown>[] = [];
-
-		if (entries.length) {
-			promises.push(
-				writeQueues.records.saveAll(
-					entries.map((
-						[_collection, commits],
-					) => (writeQueues.records.createJob({ commits }))),
-				).catch((err) => {
-					console.error(`Error saving records commits:`, err);
-				}),
-			);
-		}
-
 		for (const [collection, commits] of entries) {
-			if (!commits.length) continue;
-
-			promises.push(
-				writeQueues.collections[collection].saveAll(commits.map((commit) =>
-					writeQueues.collections[collection].createJob({ commits: [commit] })
-				)).catch((err) => {
-					console.error(`Error saving commits for ${collection}:`, err);
-				}),
-			);
-
-			if (
-				(collection === "app.bsky.feed.post" || collection === "app.bsky.actor.profile")
-				&& process.env.OPENSEARCH_URL
-			) {
-				promises.push(
-					writeQueues.opensearch.saveAll(commits.map((commit) =>
-						writeQueues.opensearch.createJob({ collection, commits: [commit] })
-					)).catch((err) => {
-						console.error(`Error saving opensearch commits for ${collection}:`, err);
-					}),
-				);
-			}
+			process.send!({ type: "commit", collection, commits } satisfies FromWorkerMessage);
 		}
-
-		if (promises.length) {
-			console.time(`Saving ${entries.length} commits`);
-			await Promise.allSettled(promises);
-			console.timeEnd(`Saving ${entries.length} commits`);
-		}
+		setTimeout(sendCommits, 1000);
 	}
 
 	async function processActorQueue() {
