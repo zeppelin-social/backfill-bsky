@@ -1,6 +1,5 @@
 import { RepoReader } from "@atcute/car/v4";
 import { parse as parseTID } from "@atcute/tid";
-import { MemoryCache } from "@atproto/identity";
 import { createClient } from "@redis/client";
 import { BackgroundQueue, Database } from "@zeppelin-social/bsky-backfill";
 import Queue from "bee-queue";
@@ -8,6 +7,7 @@ import fs from "node:fs/promises";
 import PQueue from "p-queue";
 import { IdResolver, IndexingService } from "../indexingService.js";
 import type { FromWorkerMessage } from "../main.js";
+import { LRUDidCache } from "../util/cache.js";
 import { is } from "../util/lexicons.js";
 import { RetryError, XRPCManager } from "../util/xrpc.js";
 import { writeWorkerAllocations } from "./writeCollection.js";
@@ -27,6 +27,8 @@ export async function repoWorker() {
 	await redis.connect();
 
 	const queue = new Queue<{ did: string; pds: string }>("repo-processing", {
+		sendEvents: false,
+		storeJobs: false,
 		removeOnSuccess: true,
 		removeOnFailure: true,
 		isWorker: true,
@@ -34,11 +36,15 @@ export async function repoWorker() {
 
 	const writeQueues = {
 		records: new Queue<{ commits: CommitData[] }>("records-write", {
+			getEvents: false,
+			storeJobs: false,
 			removeOnSuccess: true,
 			removeOnFailure: true,
 			isWorker: false,
 		}),
 		opensearch: new Queue<{ collection: string; commits: CommitData[] }>("opensearch-write", {
+			getEvents: false,
+			storeJobs: false,
 			removeOnSuccess: true,
 			removeOnFailure: true,
 			isWorker: false,
@@ -49,6 +55,8 @@ export async function repoWorker() {
 			) => [
 				collection,
 				new Queue<{ commits: CommitData[] }>(`collection-write-${collection}`, {
+					getEvents: false,
+					storeJobs: false,
 					removeOnSuccess: true,
 					removeOnFailure: true,
 					isWorker: false,
@@ -66,8 +74,7 @@ export async function repoWorker() {
 	const idResolver = new IdResolver({
 		plcUrl: process.env.BSKY_DID_PLC_URL,
 		fallbackPlc: process.env.FALLBACK_PLC_URL,
-		// 30s stale, 60s max; very short because we should only really see any given identity once
-		didCache: new MemoryCache(30 * 1000, 60 * 1000),
+		didCache: new LRUDidCache(10_000),
 	});
 
 	const indexingSvc = new IndexingService(db, idResolver, new BackgroundQueue(db));
@@ -98,7 +105,7 @@ export async function repoWorker() {
 	process.on("SIGTERM", handleShutdown);
 	process.on("SIGINT", handleShutdown);
 
-	setTimeout(sendCommits, 300);
+	let sendTimer = setTimeout(sendCommits, 300);
 
 	setTimeout(processActorQueue, 10_000);
 
@@ -202,25 +209,34 @@ export async function repoWorker() {
 				await redis.sAdd("backfill:seen", did);
 			}
 		}
+
 		parsed++;
+
+		if (Object.values(commitData).reduce((a, c) => a + c.length, 0) > 50_000) {
+			clearTimeout(sendTimer);
+			await sendCommits();
+		}
 	}
 
 	async function sendCommits() {
+		clearTimeout(sendTimer);
+
 		const entries = Object.entries(commitData);
 		commitData = {};
-		if (!entries.length) return;
 
 		const promises: Promise<unknown>[] = [];
 
-		promises.push(
-			writeQueues.records.saveAll(
-				entries.map((
-					[_collection, commits],
-				) => (writeQueues.records.createJob({ commits }))),
-			).catch((err) => {
-				console.error(`Error saving records commits:`, err);
-			}),
-		);
+		if (entries.length) {
+			promises.push(
+				writeQueues.records.saveAll(
+					entries.map((
+						[_collection, commits],
+					) => (writeQueues.records.createJob({ commits }))),
+				).catch((err) => {
+					console.error(`Error saving records commits:`, err);
+				}),
+			);
+		}
 
 		for (const [collection, commits] of entries) {
 			if (!commits.length) continue;
@@ -247,7 +263,7 @@ export async function repoWorker() {
 			}
 		}
 
-		setTimeout(sendCommits, 300);
+		sendTimer = setTimeout(sendCommits, 300);
 
 		await Promise.allSettled(promises);
 	}

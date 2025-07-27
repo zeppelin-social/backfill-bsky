@@ -1,6 +1,5 @@
 import { fromBytes } from "@atcute/cbor";
 import { isBlob, isBytes, isCidLink, isLegacyBlob } from "@atcute/lexicons/interfaces";
-import { MemoryCache } from "@atproto/identity";
 import { BlobRef, lexToJson } from "@atproto/lexicon";
 import { AtUri } from "@atproto/syntax";
 import { BackgroundQueue, Database } from "@zeppelin-social/bsky-backfill";
@@ -9,6 +8,7 @@ import { CID } from "multiformats/cid";
 import fs from "node:fs/promises";
 import { IdResolver, IndexingService } from "../indexingService.js";
 import type { FromWorkerMessage } from "../main.js";
+import { LRUDidCache } from "../util/cache.js";
 import type { CommitData } from "./repo.js";
 
 export type ToInsertCommit = { uri: AtUri; cid: CID; timestamp: string; obj: unknown };
@@ -54,8 +54,7 @@ export async function writeCollectionWorker() {
 	const idResolver = new IdResolver({
 		plcUrl: process.env.BSKY_DID_PLC_URL,
 		fallbackPlc: process.env.FALLBACK_PLC_URL,
-		// 1m stale, 2m max; very short because we should only really see any given identity once or twice
-		didCache: new MemoryCache(1 * 60 * 1000, 2 * 60 * 1000),
+		didCache: new LRUDidCache(10_000),
 	});
 
 	const indexingSvc = new IndexingService(db, idResolver, new BackgroundQueue(db));
@@ -71,6 +70,8 @@ export async function writeCollectionWorker() {
 		batches[collection] = [];
 
 		const queue = new Queue<{ commits: CommitData[] }>(`collection-write-${collection}`, {
+			sendEvents: false,
+			storeJobs: false,
 			removeOnSuccess: true,
 			removeOnFailure: true,
 			isWorker: true,

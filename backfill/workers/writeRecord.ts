@@ -1,4 +1,3 @@
-import { MemoryCache } from "@atproto/identity";
 import { lexToJson } from "@atproto/lexicon";
 import { AtUri } from "@atproto/syntax";
 import { BackgroundQueue, Database } from "@zeppelin-social/bsky-backfill";
@@ -7,6 +6,7 @@ import { CID } from "multiformats/cid";
 import fs from "node:fs/promises";
 import { IdResolver, IndexingService } from "../indexingService.js";
 import type { FromWorkerMessage } from "../main.js";
+import { LRUDidCache } from "../util/cache.js";
 import type { CommitData } from "./repo.js";
 import type { ToInsertCommit } from "./writeCollection.js";
 
@@ -23,8 +23,7 @@ export async function writeRecordWorker() {
 	const idResolver = new IdResolver({
 		plcUrl: process.env.BSKY_DID_PLC_URL,
 		fallbackPlc: process.env.FALLBACK_PLC_URL,
-		// 1m stale, 2m max; very short because we should only really see any given identity once or twice
-		didCache: new MemoryCache(1 * 60 * 1000, 2 * 60 * 1000),
+		didCache: new LRUDidCache(10_000),
 	});
 
 	const indexingSvc = new IndexingService(db, idResolver, new BackgroundQueue(db));
@@ -36,6 +35,8 @@ export async function writeRecordWorker() {
 	let isShuttingDown = false;
 
 	const queue = new Queue<{ commits: CommitData[] }>("records-write", {
+		sendEvents: false,
+		storeJobs: false,
 		removeOnSuccess: true,
 		removeOnFailure: true,
 		isWorker: true,

@@ -36,6 +36,8 @@ export async function openSearchWorker() {
 	let isShuttingDown = false;
 
 	const queue = new Queue<{ collection: string; commits: CommitData[] }>("records-write", {
+		sendEvents: false,
+		storeJobs: false,
 		removeOnSuccess: true,
 		removeOnFailure: true,
 		isWorker: true,
