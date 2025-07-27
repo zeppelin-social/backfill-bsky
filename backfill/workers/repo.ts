@@ -131,6 +131,10 @@ export async function repoWorker() {
 		const heap = fmt(mu.heapUsed);
 		const rss = fmt(mu.rss);
 
+		global.gc?.();
+		const mu2 = process.memoryUsage();
+		const heap2 = fmt(mu2.heapUsed);
+
 		const pendingCommits = Object.values(commitData).reduce((a, c) => a + c.length, 0);
 
 		const { waiting, active } = await queue.checkHealth();
@@ -139,7 +143,7 @@ export async function repoWorker() {
 		const running = processRepoPQueue.pending;
 
 		console.log(
-			`[mem ${process.pid}] buffers=${buf} rss=${rss} heap=${heap} commits=${pendingCommits} queue waiting=${waiting} active=${active} queued=${queued} running=${running}`,
+			`[mem ${process.pid}] buffers=${buf} rss=${rss} heap=${heap} (after gc=${heap2}) commits=${pendingCommits} queue waiting=${waiting} active=${active} queued=${queued} running=${running}`,
 		);
 	}, 10_000);
 
