@@ -96,26 +96,32 @@ export async function repoWorker() {
 
 	const fmt = (n: number) => (n / 1024 / 1024).toFixed(1) + " MB";
 
-	setInterval(() => {
-		const hr = process.resourceUsage?.() ?? {};
+	setInterval(async () => {
+	  global.gc?.()
 
-		global.gc?.();
+	  const mu  = process.memoryUsage()
+	  const rssNative =
+	    mu.rss - mu.heapTotal - mu.external - mu.arrayBuffers
 
-		const { rss, heapUsed, heapTotal, external, arrayBuffers } = process.memoryUsage();
+	  let fds = 0
+	  try { fds = (await fs.readdir('/proc/self/fd')).length } catch {}
 
-		const handles = (process as any)._getActiveHandles().length;
-		const undiciStat = (getGlobalDispatcher() as any).stats;
+	  const handles = (process as any)._getActiveHandles().length
 
-		console.log(
-			"[mem] rss=" + fmt(rss)
-				+ " | heap=" + fmt(heapUsed) + "/" + fmt(heapTotal)
-				+ " | external=" + fmt(external)
-				+ " | arrayBuf=" + fmt(arrayBuffers)
-				+ " | handles=" + handles
-				+ (undiciStat ? " | undici sockets=" + JSON.stringify(undiciStat) : "")
-				+ (hr.maxRSS ? " | maxRSS=" + fmt(hr.maxRSS * 1024) : ""),
-		);
-	}, 10_000);
+	  /* undici connection statistics (open & busy sockets) */
+	  const disp = getGlobalDispatcher() as any
+	  const undiciOpen   = disp?.stats?.size ?? 0
+	  const undiciBusy   = disp?.stats?.busy ?? 0
+	  const undiciQueued = disp?.stats?.queued ?? 0
+
+	  console.log(
+	    `[native] rss=${fmt(mu.rss)}  darkNative=${fmt(rssNative)}  ` +
+	    `heapUsed=${fmt(mu.heapUsed)}  ext=${fmt(mu.external)}  ` +
+	    `fds=${fds} handles=${handles}  ` +
+	    `undici(open=${undiciOpen}, busy=${undiciBusy}, queued=${undiciQueued})`
+	  )
+	}, 15_000)
+
 
 	async function processRepo(job: Queue.Job<{ did: string; pds: string }>, attempt = 0) {
 		if (!process?.send) throw new Error("Not a worker process");
