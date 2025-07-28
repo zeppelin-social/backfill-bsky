@@ -40,7 +40,7 @@
 		"@atproto/syntax": "^0.3.2",
 		"@opensearch-project/opensearch": "^3.5.1",
 		"@redis/client": "^1.6.0",
-		"@zeppelin-social/bsky-backfill": "0.0.176-dev.1",
+		"@zeppelin-social/bsky-backfill": "0.0.176-dev.2",
 		"bee-queue": "^1.7.1",
 		"cacheable-lookup": "^7.0.0",
 		"kysely": "^0.22.0",
