@@ -1,6 +1,6 @@
 import { isCanonicalResourceUri, isCid } from "@atcute/lexicons/syntax";
 import { IdResolver, MemoryCache } from "@atproto/identity";
-import { jsonStringToLex, jsonToLex, lexToJson } from "@atproto/lexicon";
+import { jsonStringToLex, jsonToLex } from "@atproto/lexicon";
 import { AtUri } from "@atproto/syntax";
 import { Client as OpenSearchClient } from "@opensearch-project/opensearch";
 import { BackgroundQueue, Database } from "@zeppelin-social/bsky-backfill";
@@ -25,6 +25,7 @@ import { sql } from "kysely";
 import { LRUCache } from "lru-cache";
 import { CID } from "multiformats/cid";
 import fs from "node:fs";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import readline from "node:readline/promises";
 import { IndexingService } from "../backfill/indexingService";
@@ -35,7 +36,7 @@ import {
 	PROFILE_INDEX,
 	type ProfileDoc,
 } from "../backfill/workers/opensearch";
-import { type ToInsertCommit, writeWorkerAllocations } from "../backfill/workers/writeCollection";
+import { writeWorkerAllocations } from "../backfill/workers/writeCollection";
 import { WriteOpAction } from "@atproto/repo";
 
 declare global {
@@ -499,10 +500,10 @@ async function retryFailedWrites(db: Database) {
 
 	const collections = writeWorkerAllocations.flat();
 
-	const failedActorDids = fs.readFileSync("./failed-actors.jsonl", "utf8").split("\n").flatMap((
+	const failedActorDids = (await readFile("./failed-actors.jsonl", "utf8").catch(() => "")).split("\n").flatMap((
 		s,
 	) => s.split(",")).filter((d) => d.startsWith("did:plc:") || d.startsWith("did:web:"));
-	const failedSearchDocs = fs.readFileSync("./failed-search.jsonl", "utf8").split("\n").map(
+	const failedSearchDocs = (await readFile("./failed-search.jsonl", "utf8").catch(() => "")).split("\n").map(
 		(s) => {
 			try {
 				return JSON.parse(s) as PostDoc | ProfileDoc;
@@ -552,12 +553,13 @@ async function retryFailedWrites(db: Database) {
 	const seenUris = new LRUCache<string, boolean>({ max: 5_000_000 });
 
 	const recordsStartingPosition = fs.existsSync("./failed-records.pos")
-		? parseInt(fs.readFileSync("./failed-records.pos", "utf8"))
+		? parseInt(await readFile("./failed-records.pos", "utf8"))
 		: 0;
 	let recordsPosition = 0;
 	let collectionPositions: Record<string, number> = {};
 
 	const recordsPromise = (async () => {
+		if (!fs.existsSync("./failed-records.jsonl")) return;
 		const fstream = fs.createReadStream("./failed-records.jsonl");
 		const rl = readline.createInterface({ input: fstream, crlfDelay: Infinity });
 
@@ -612,7 +614,7 @@ async function retryFailedWrites(db: Database) {
 		const rl = readline.createInterface({ input: fstream, crlfDelay: Infinity });
 
 		const startingPosition = fs.existsSync(`./failed-${collection}.pos`)
-			? parseInt(fs.readFileSync(`./failed-${collection}.pos`, "utf8"))
+			? parseInt(await readFile(`./failed-${collection}.pos`, "utf8"))
 			: 0;
 
 		collectionPositions[collection] = 0;
