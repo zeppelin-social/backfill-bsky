@@ -36,6 +36,7 @@ import {
 	type ProfileDoc,
 } from "../backfill/workers/opensearch";
 import { type ToInsertCommit, writeWorkerAllocations } from "../backfill/workers/writeCollection";
+import { WriteOpAction } from "@atproto/repo";
 
 declare global {
 	namespace NodeJS {
@@ -560,8 +561,6 @@ async function retryFailedWrites(db: Database) {
 		const fstream = fs.createReadStream("./failed-records.jsonl");
 		const rl = readline.createInterface({ input: fstream, crlfDelay: Infinity });
 
-		let batch: ToInsertCommit[] = [];
-
 		for await (const line of rl) {
 			recordsPosition++;
 			if (recordsPosition < recordsStartingPosition) continue;
@@ -590,35 +589,19 @@ async function retryFailedWrites(db: Database) {
 					continue;
 				}
 
-				batch.push({
-					uri,
-					cid: CID.parse(msg.cid),
-					timestamp: msg.timestamp,
-					obj: jsonToLex(msg.obj),
-				});
+				await indexingSvc.indexRecord(
+					new AtUri(msg.uri),
+					CID.parse(msg.cid),
+					jsonToLex(msg.obj),
+					WriteOpAction.Create,
+					msg.timestamp,
+					{ disableNotifs: true, skipValidation: true },
+				);
+
 				seenUris.set(msg.uri, true);
 			} catch (e) {
 				console.error(`Failed to parse failed-records.jsonl line ${recordsPosition}`);
 				if (`${e}`.includes("Out of memory")) exit();
-				continue;
-			}
-
-			if (batch.length >= RECORDS_BATCH_SIZE) {
-				try {
-					console.time(
-						`bulk indexing to records ${batch.length} records at line ${recordsPosition}`,
-					);
-					await indexingSvc.bulkIndexToRecordTable(batch);
-					console.timeEnd(
-						`bulk indexing to records ${batch.length} records at line ${recordsPosition}`,
-					);
-				} catch (e) {
-					console.error(`Failed to index records`, e);
-					if (`${e}`.includes("Out of memory")) exit();
-				} finally {
-					batch = [];
-					fs.writeFileSync(`./failed-records.pos`, `${recordsPosition}`);
-				}
 			}
 		}
 	})();
@@ -633,7 +616,6 @@ async function retryFailedWrites(db: Database) {
 			: 0;
 
 		collectionPositions[collection] = 0;
-		let batch: ToInsertCommit[] = [];
 
 		for await (const line of rl) {
 			collectionPositions[collection]++;
@@ -660,12 +642,15 @@ async function retryFailedWrites(db: Database) {
 					continue;
 				}
 
-				batch.push({
-					uri,
-					cid: CID.parse(msg.cid),
-					timestamp: msg.timestamp,
-					obj: jsonToLex(msg.obj),
-				});
+				await indexingSvc.indexRecord(
+					new AtUri(msg.uri),
+					CID.parse(msg.cid),
+					jsonToLex(msg.obj),
+					WriteOpAction.Create,
+					msg.timestamp,
+					{ disableNotifs: true, skipValidation: true },
+				);
+
 				seenUris.set(msg.uri, true);
 			} catch (e) {
 				console.error(
@@ -674,36 +659,6 @@ async function retryFailedWrites(db: Database) {
 					}`,
 				);
 				if (`${e}`.includes("Out of memory")) exit();
-				continue;
-			}
-
-			if (batch.length >= RECORDS_BATCH_SIZE) {
-				try {
-					console.time(
-						`bulk indexing to collection ${collection} ${batch.length} records at line ${
-							collectionPositions[collection]
-						}`,
-					);
-					await indexingSvc.bulkIndexToCollectionSpecificTables(
-						new Map([[collection, batch]]),
-						{ validate: false },
-					);
-					console.timeEnd(
-						`bulk indexing to collection ${collection} ${batch.length} records at line ${
-							collectionPositions[collection]
-						}`,
-					);
-				} catch (e) {
-					console.error(
-						`Failed to index collection records for ${collection} on line ${
-							collectionPositions[collection]
-						}`,
-						e,
-					);
-					if (`${e}`.includes("Out of memory")) exit();
-				} finally {
-					batch = [];
-				}
 			}
 		}
 	});
