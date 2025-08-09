@@ -1,5 +1,5 @@
 import { iterateAtpRepo } from "@atcute/car";
-import { simpleFetchHandler, Client, ok } from "@atcute/client";
+import { Client, ok, simpleFetchHandler } from "@atcute/client";
 import { parse as parseTID } from "@atcute/tid";
 import { IdResolver, MemoryCache } from "@atproto/identity";
 import { AtUri } from "@atproto/syntax";
@@ -109,10 +109,12 @@ async function getRepoRecords(did: string, indexingSvc: IndexingService) {
 		const { idResolver } = indexingSvc;
 		const { pds } = await idResolver.did.resolveAtprotoData(did);
 		const agent = new Client({ handler: simpleFetchHandler({ service: pds }) });
-		const repo = await ok(agent.get(`com.atproto.sync.getRepo`, {
-			params: { did: did as `did:${string}:${string}` },
-			as: "bytes"
-		}));
+		const repo = await ok(
+			agent.get(`com.atproto.sync.getRepo`, {
+				params: { did: did as `did:${string}:${string}` },
+				as: "bytes",
+			}),
+		);
 
 		const records: Record<
 			string,

@@ -1,6 +1,7 @@
 import { isCanonicalResourceUri, isCid } from "@atcute/lexicons/syntax";
 import { IdResolver, MemoryCache } from "@atproto/identity";
 import { jsonStringToLex, jsonToLex } from "@atproto/lexicon";
+import { WriteOpAction } from "@atproto/repo";
 import { AtUri } from "@atproto/syntax";
 import { Client as OpenSearchClient } from "@opensearch-project/opensearch";
 import { BackgroundQueue, Database } from "@zeppelin-social/bsky-backfill";
@@ -37,7 +38,6 @@ import {
 	type ProfileDoc,
 } from "../backfill/workers/opensearch";
 import { writeWorkerAllocations } from "../backfill/workers/writeCollection";
-import { WriteOpAction } from "@atproto/repo";
 
 declare global {
 	namespace NodeJS {
@@ -500,18 +500,19 @@ async function retryFailedWrites(db: Database) {
 
 	const collections = writeWorkerAllocations.flat();
 
-	const failedActorDids = (await readFile("./failed-actors.jsonl", "utf8").catch(() => "")).split("\n").flatMap((
-		s,
-	) => s.split(",")).filter((d) => d.startsWith("did:plc:") || d.startsWith("did:web:"));
-	const failedSearchDocs = (await readFile("./failed-search.jsonl", "utf8").catch(() => "")).split("\n").map(
-		(s) => {
+	const failedActorDids = (await readFile("./failed-actors.jsonl", "utf8").catch(() => "")).split(
+		"\n",
+	).flatMap((s) => s.split(",")).filter((d) =>
+		d.startsWith("did:plc:") || d.startsWith("did:web:")
+	);
+	const failedSearchDocs = (await readFile("./failed-search.jsonl", "utf8").catch(() => ""))
+		.split("\n").map((s) => {
 			try {
 				return JSON.parse(s) as PostDoc | ProfileDoc;
 			} catch (e) {
 				console.error(`Failed to parse failed-search.jsonl line ${s}`);
 			}
-		},
-	).filter((s) => !!s);
+		}).filter((s) => !!s);
 
 	const onBeforeExit = () => {
 		fs.writeFileSync("./failed-records.pos", `${recordsPosition}`);
