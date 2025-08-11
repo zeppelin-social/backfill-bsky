@@ -44,7 +44,6 @@
 		"bee-queue": "^1.7.1",
 		"cacheable-lookup": "^7.0.0",
 		"kysely": "^0.22.0",
-		"large-set": "^1.0.3",
 		"lru-cache": "^11.1.0",
 		"multiformats": "^13.3.1",
 		"normalize-url": "^8.0.2",

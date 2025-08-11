@@ -135,7 +135,11 @@ export async function openSearchWorker() {
 
 // Everything below is ported nearly 1:1 from github.com/bluesky-social/indigo/tree/main/search/transform.go
 
-function transformProfile(profile: AppBskyActorProfile.Main, did: Did, cid: string): ProfileDoc {
+export function transformProfile(
+	profile: AppBskyActorProfile.Main,
+	did: Did,
+	cid: string,
+): ProfileDoc {
 	const emojis = profile.description ? parseEmojis(profile.description) : undefined;
 	const selfLabels = profile.labels?.values?.map((v) => v.val) ?? [];
 
@@ -153,7 +157,12 @@ function transformProfile(profile: AppBskyActorProfile.Main, did: Did, cid: stri
 	};
 }
 
-function transformPost(post: AppBskyFeedPost.Main, did: Did, rkey: string, cid: string): PostDoc {
+export function transformPost(
+	post: AppBskyFeedPost.Main,
+	did: Did,
+	rkey: string,
+	cid: string,
+): PostDoc {
 	const has = new Set<string>();
 
 	const altText: string[] = [];
