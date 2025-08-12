@@ -51,22 +51,21 @@ async function backfillPosts() {
 	const queue = new PQueue({ concurrency: 5 });
 
 	let offset = 0;
-	let done = false;
-	while (!done) {
+	while (true) {
 		await queue.onSizeLessThan(5);
 
+		const posts = await db.db.selectFrom("record").select(["uri", "cid", "json"]).where(
+			"uri",
+			"in",
+			(eb) =>
+				eb.selectFrom("post").select(["uri"]).orderBy("uri", "desc").limit(10_000)
+					.offset(offset),
+		).execute();
+
+		if (posts.length < 10_000) break;
+		offset += posts.length;
+
 		void queue.add(async () => {
-			const posts = await db.db.selectFrom("record").select(["uri", "cid", "json"]).where(
-				"uri",
-				"in",
-				(eb) =>
-					eb.selectFrom("post").select(["uri"]).orderBy("uri", "desc").limit(10_000)
-						.offset(offset),
-			).execute();
-
-			if (posts.length === 0) done = true;
-			offset += posts.length;
-
 			const datasource = posts.reduce((acc, p) => {
 				const { host: did, rkey } = new AtUri(p.uri);
 				try {
@@ -89,21 +88,21 @@ async function backfillProfiles() {
 	const queue = new PQueue({ concurrency: 5 });
 
 	let offset = 0;
-	let done = false;
-	while (!done) {
+	while (true) {
 		await queue.onSizeLessThan(5);
 
-		void queue.add(async () => {
-			const profiles = await db.db.selectFrom("record").select(["did", "cid", "json"]).where(
-				"uri",
-				"in",
-				(eb) =>
-					eb.selectFrom("profile").select(["uri"]).orderBy("uri", "desc").limit(10_000)
-						.offset(offset),
-			).execute();
+		const profiles = await db.db.selectFrom("record").select(["did", "cid", "json"]).where(
+			"uri",
+			"in",
+			(eb) =>
+				eb.selectFrom("profile").select(["uri"]).orderBy("uri", "desc").limit(10_000)
+					.offset(offset),
+		).execute();
 
-			if (profiles.length === 0) done = true;
-			offset += profiles.length;
+		if (profiles.length < 10_000) break;
+		offset += profiles.length;
+
+		void queue.add(async () => {
 
 			const datasource = profiles.reduce((acc, p) => {
 				try {
