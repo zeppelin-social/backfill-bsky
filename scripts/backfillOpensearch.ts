@@ -58,11 +58,12 @@ async function backfillPosts() {
 			"uri",
 			"in",
 			(eb) =>
-				eb.selectFrom("post").select(["uri"]).orderBy("uri", "desc").limit(10_000)
-					.offset(offset),
+				eb.selectFrom("post").select(["uri"]).orderBy("uri", "desc").limit(10_000).offset(
+					offset,
+				),
 		).execute();
 
-		if (posts.length < 10_000) break;
+		if (posts.length === 0) break;
 		offset += posts.length;
 
 		void queue.add(async () => {
@@ -99,11 +100,10 @@ async function backfillProfiles() {
 					.offset(offset),
 		).execute();
 
-		if (profiles.length < 10_000) break;
+		if (profiles.length === 0) break;
 		offset += profiles.length;
 
 		void queue.add(async () => {
-
 			const datasource = profiles.reduce((acc, p) => {
 				try {
 					const profile: unknown = JSON.parse(p.json);
